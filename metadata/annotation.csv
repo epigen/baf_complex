@@ -1,4 +1,8 @@
 sample_name,library,cell_line,knockout,replicate,knockout_id,clone,knockout_replicate,organism,sex
+HAP1_ATAC-seq_WT_Bulk_1,ATAC-seq,HAP1,WT,r1,,,,human,
+HAP1_ATAC-seq_WT_Bulk_2,ATAC-seq,HAP1,WT,r2,,,,human,
+HAP1_ATAC-seq_WT_Bulk_3,ATAC-seq,HAP1,WT,r3,,,,human,
+HAP1_ATAC-seq_WT_Bulk_4,ATAC-seq,HAP1,WT,r4,,,,human,
 ATAC-seq_HAP1_ACTB_r1_2471_10,ATAC-seq,HAP1,ACTB,r1,2471,10,1,human,male
 ATAC-seq_HAP1_ACTB_r2_2471_10,ATAC-seq,HAP1,ACTB,r2,2471,10,2,human,male
 ATAC-seq_HAP1_ARID1A_r1_618_10,ATAC-seq,HAP1,ARID1A,r1,618,10,1,human,male
