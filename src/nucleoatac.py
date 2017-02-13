@@ -27,13 +27,35 @@ def nucleoatac(bed_file, bam_file, fasta_file, output_basename, cpus=4):
         cpus_per_task=cpus, time='2-00:00:00', queue="mediumq", mem_per_cpu=24000)
 
     cmd += """
+
+\t\t# Remove everything to do with your python and env.  Even reset your home dir
+\t\tunset PYTHONPATH
+\t\tunset PYTHON_HOME
+\t\tmodule purge
+\t\tmodule load python/2.7.6
+\t\tmodule load slurm
+\t\tmodule load gcc/4.8.2
+
+\t\tENV_DIR=/scratch/users/arendeiro/nucleoenv
+\t\texport HOME=$ENV_DIR/home
+
+\t\t# Activate your virtual env
+\t\texport VIRTUALENVWRAPPER_PYTHON=/cm/shared/apps/python/2.7.6/bin/python
+\t\tsource $ENV_DIR/bin/activate
+
+\t\t# Prepare to install new python packages
+\t\texport PATH=$ENV_DIR/install/bin:$PATH
+\t\texport PYTHONPATH=$ENV_DIR/install/lib/python2.7/site-packages
+
 \t\tnucleoatac run \
 \t\t--write_all \
 \t\t--cores {0} \
 \t\t--bed {1} \
 \t\t--bam {2} \
-\t\t--out {3} \
-\t\t--fasta {4}
+\t\t--fasta {3} \
+\t\t--out {4}
+
+\t\tdeactivate
 """.format(cpus, bed_file, bam_file, fasta_file, output_basename)
     cmd += tk.slurm_footer()
 
@@ -47,7 +69,6 @@ def nucleoatac(bed_file, bam_file, fasta_file, output_basename, cpus=4):
 def main():
     # Start project
     prj = Project("metadata/project_config.yaml")
-    prj.add_sample_sheet()
 
     # merged replicates/clones
     merged_dir = os.path.join(prj.metadata.results_subdir, "merged")
@@ -66,7 +87,7 @@ def main():
     for attrs, index in df.groupby(["library", "cell_line", "knockout", "clone"]).groups.items():
         name = "_".join([a for a in attrs if not pd.isnull(a)])
 
-        merged_bam = os.path.join(merged_dir, name + ".merged.bam")
+        merged_bam = os.path.join(merged_dir, name + ".merged.sorted.bam")
         output_basename = os.path.join(output_dir, name, name)
         if not os.path.exists(os.path.dirname(output_basename)):
             os.mkdir(os.path.dirname(output_basename))
