@@ -2482,6 +2482,7 @@ class Analysis(object):
             g.fig.savefig(os.path.join(output_dir, "enrichr.%s.cluster_specific.z_score.png" % gene_set_library), bbox_inches="tight", dpi=300)
 
     def accessibility_expression(
+            self,
             acce_dir="deseq_knockout",
             expr_dir="deseq_expression_knockout",
             trait="knockout"
@@ -2542,24 +2543,38 @@ class Analysis(object):
             # correlate
             r, p = pearsonr(a, b)
 
-            # perform lowess
-            l = lowess(a, b, return_sorted=False)
+            # fit lowess
+            if i == 0:
+                l = lowess(a, b, return_sorted=False)
+                # pass
             dist = pd.DataFrame([abs(a - l), abs(b - l)]).mean()
 
             # plot scatter
-            axis.flat[i].scatter(a, b, s=1, color=plt.cm.GnBu(dist))
+            axis.flat[i].scatter(a, b, s=0.5, color=plt.cm.GnBu(dist))
 
             # add title and correlation values
             axis.flat[i].set_title(ko)
-            axis.flat[i].text(1, -5, s="r = {:.3f}\np = {:.3f}".format(r, p))
+            axis.flat[i].text(1, -5, s="r = {:.3f}".format(r))  # \np = {:.3f}
 
-            # # Color significant differently
+            # Color significant differently
             # sig = expr_fc[(abs(a) > 1) & (abs(b) > 1)].index
-            # axis.flat[i].scatter(a.ix[sig], b.ix[sig], s=1, color=sns.color_palette("colorblind")[2])
+            sig = dist[dist > np.percentile(dist, 99)].index
+
+            axis.flat[i].scatter(a.ix[sig], b.ix[sig], s=1, color=sns.color_palette("Set3")[3])
 
         axis[2, 0].set_ylabel("log2 fold-change (ATAC-seq)")
         axis[4, 2].set_xlabel("log2 fold-change (RNA-seq)")
-        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.png"), bbox_inches="tight", dpi=300)
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.99_perc.png"), bbox_inches="tight", dpi=400)
+
+        # Check if genes with high agreement and increase are just already more expressed or accessible to begin with
+        g_up = sig[(pd.DataFrame([a.ix[sig], b.ix[sig]]).T > 0).all(1)]
+        g_down = sig[(pd.DataFrame([a.ix[sig], b.ix[sig]]).T < 0).all(1)]
+        self.expression.ix[g_up]
+        self.expression.ix[g_down]
+        self.accessibility.ix[sig]
+        self.expression.ix[sig]
+
+        # Check if genes with increasing expression but no increasing accessibility are already more accessible to begin with
 
         # Using the native many-to-one relationships for ATAC-seq
 
@@ -2987,6 +3002,57 @@ def characterize_regions_function(df, output_dir, prefix, results_dir="results",
     results.to_csv(os.path.join(output_dir, "%s_regions.enrichr.csv" % prefix), index=False, encoding='utf-8')
 
 
+def metagene_plot(bams, labels, output_prefix, region="genebody", genome="hg19"):
+    from pypiper import NGSTk
+    import textwrap
+    import os
+    tk = NGSTk()
+
+    job_name = output_prefix
+    job_file = output_prefix + ".sh"
+    job_log = output_prefix + ".log"
+
+    # write ngsplot config file to disk
+    config_file = os.path.join(os.environ['TMPDIR'], "ngsplot_config.txt")
+    with open(config_file, "w") as handle:
+        for i in range(len(bams)):
+            handle.write("\t".join([bams[i], "-1", labels[i]]) + "\n")
+
+    cmd = tk.slurm_header(job_name, job_log, queue="mediumq", time="1-10:00:00", mem_per_cpu=8000, cpus_per_task=8)
+
+    # build plot command
+    if region == "genebody":
+        cmd += """xvfb-run ngs.plot.r -G {0} -R {1} -C {2} -O {3} -L 3000 -GO km\n""".format(genome, region, config_file, output_prefix)
+    elif region == "tss":
+        cmd += """xvfb-run ngs.plot.r -G {0} -R {1} -C {2} -O {3} -L 3000 -FL 300\n""".format(genome, region, config_file, output_prefix)
+
+    cmd += tk.slurm_footer()
+
+    # write job to file
+    with open(job_file, 'w') as handle:
+        handle.writelines(textwrap.dedent(cmd))
+
+    tk.slurm_submit_job(job_file)
+
+
+def global_changes(samples, trait="knockout"):
+    import glob
+    import re
+
+    output_dir = os.path.join("data", "merged")
+    # sel_samples = [s for s in samples if not pd.isnull(getattr(s, trait))]
+    # groups = sorted(list(set([getattr(s, trait) for s in sel_samples])))
+    groups = [os.path.basename(re.sub(".merged.sorted.bam", "", x)) for x in glob.glob(output_dir + "/*.merged.sorted.bam")]
+
+    for region in ["genebody", "tss"]:
+        print metagene_plot(
+            [os.path.abspath(os.path.join(output_dir, group + ".merged.sorted.bam")) for group in groups],
+            groups,
+            os.path.abspath(os.path.join(output_dir, "%s.metaplot" % region)),
+            region=region
+        )
+
+
 def add_args(parser):
     """
     Options for project and pipelines.
@@ -3036,7 +3102,6 @@ def main():
     # GET CHROMATIN OPENNESS MEASUREMENTS, PLOT
     # Get coverage values for each peak in each sample of ATAC-seq and ChIPmentation
     analysis.measure_coverage(atacseq_samples)
-    analysis.to_pickle()
     # normalize coverage values
     analysis.normalize_coverage_quantiles(atacseq_samples)
     analysis.get_peak_gccontent_length()
@@ -3052,7 +3117,6 @@ def main():
     # genomic location, mean and variance measurements across samples
     analysis.annotate(atacseq_samples)
     analysis.annotate_with_sample_metadata()
-
     analysis.to_pickle()
 
     # Unsupervised analysis
@@ -3070,12 +3134,15 @@ def main():
     # Supervised analysis
     analysis.differential_region_analysis(atacseq_samples)
 
+    # Investigate global changes in accessibility
+    global_changes(atacseq_samples)
+
     # RNA-seq
     analysis.get_gene_expression(samples=rnaseq_samples)
     # Unsupervised analysis
     analysis.unsupervised_expression(rnaseq_samples, attributes=["knockout", "replicate", "clone"])
     # Supervised analysis
-    analusis.differential_expression_analysis()
+    analysis.differential_expression_analysis()
 
 if __name__ == '__main__':
     try:
