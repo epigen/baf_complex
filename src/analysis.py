@@ -2379,10 +2379,6 @@ class Analysis(object):
 
         # Examine each region cluster
         max_diff = 1000
-
-        region_enr = pd.DataFrame()
-        lola_enr = pd.DataFrame()
-        motif_enr = pd.DataFrame()
         pathway_enr = pd.DataFrame()
         for cond1 in sorted(groups):
             # get comparison
@@ -2420,27 +2416,152 @@ class Analysis(object):
                     os.makedirs(comparison_dir)
 
                 print("Doing regions of comparison %s, with prefix %s" % (comparison, prefix))
-
-                # region's function
-                if not os.path.exists(os.path.join(comparison_dir, prefix + "_regions.enrichr.csv")):
+                if not os.path.exists(os.path.join(comparison_dir, "enrichr.csv")):
                     comparison_df.reset_index()[['gene_name']].drop_duplicates().to_csv(os.path.join(comparison_dir, "genes.txt"), index=False)
                     enr = enrichr(comparison_df.reset_index())
-                    enr.to_csv(os.path.join(comparison_dir, prefix + "_genes.enrichr.csv"), index=False)
-
-                enr = pd.read_csv(os.path.join(comparison_dir, prefix + "_genes.enrichr.csv"))
-                enr["comparison"] = prefix
-                pathway_enr = pathway_enr.append(enr, ignore_index=True)
+                    enr.to_csv(os.path.join(comparison_dir, "enrichr.csv"), index=False)
+                else:
+                    enr = pd.read_csv(os.path.join(comparison_dir, "enrichr.csv"))
+                    enr["comparison"] = prefix
+                    pathway_enr = pathway_enr.append(enr, ignore_index=True)
 
         # write combined enrichments
-        region_enr.to_csv(
-            os.path.join(output_dir, "%s.%s.diff_regions.regions.csv" % (output_suffix, trait)), index=False)
-        lola_enr.to_csv(
-            os.path.join(output_dir, "%s.%s.diff_regions.lola.csv" % (output_suffix, trait)), index=False)
         pathway_enr.to_csv(
-            os.path.join(output_dir, "%s.%s.diff_regions.enrichr.csv" % (output_suffix, trait)), index=False)
-        motif_enr.columns = ["id", "p_value", "comparison"]
-        motif_enr.to_csv(
-            os.path.join(output_dir, "%s.%s.diff_regions.motifs.csv" % (output_suffix, trait)), index=False)
+            os.path.join(output_dir, "%s.%s.diff_genes.enrichr.csv" % (output_suffix, trait)), index=False)
+
+    def investigate_differential_genes(
+            self, samples, trait="knockout",
+            variables=["knockout", "replicate"],
+            output_suffix="deseq_expression_knockout", n=20, method="groups"):
+        output_dir = os.path.join(self.results_dir, output_suffix)
+
+        # ENRICHR
+        # read in
+        pathway_enr = pd.read_csv(os.path.join(output_dir, "%s.%s.diff_genes.enrichr.csv" % (output_suffix, trait)))
+        # pretty names
+        pathway_enr["comparison"] = pathway_enr["comparison"].str.extract("%s.%s.diff_regions.comparison_(.*)" % (output_suffix, trait), expand=True)
+        pathway_enr["description"] = pathway_enr["description"].str.decode("utf-8")
+
+        for gene_set_library in pathway_enr["gene_set_library"].unique():
+            print(gene_set_library)
+            if gene_set_library == "Epigenomics_Roadmap_HM_ChIP-seq":
+                continue
+
+            # pivot table
+            enrichr_pivot = pd.pivot_table(
+                pathway_enr[pathway_enr["gene_set_library"] == gene_set_library],
+                values="p_value", columns="description", index="comparison").fillna(1)
+
+            # transform p-values
+            enrichr_pivot = -np.log10(enrichr_pivot.fillna(1))
+            enrichr_pivot = enrichr_pivot.replace({np.inf: 300})
+
+            # plot correlation
+            g = sns.clustermap(enrichr_pivot.T.corr(), cbar_kws={"label": "Correlation of enrichemnt\nof differential genes"})
+            g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+            g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+            # g.fig.savefig(os.path.join(output_dir, "enrichr.%s.correlation.svg" % gene_set_library), bbox_inches="tight")
+            g.fig.savefig(os.path.join(output_dir, "enrichr.%s.correlation.png" % gene_set_library), bbox_inches="tight", dpi=300)
+
+            top = pathway_enr[pathway_enr["gene_set_library"] == gene_set_library].set_index('description').groupby("comparison")['p_value'].nlargest(n)
+            top_terms = top.index.get_level_values('description').unique()
+            # top_terms = top_terms[top_terms.isin(lola_pivot.columns[lola_pivot.sum() > 5])]
+
+            # plot clustered heatmap
+            g = sns.clustermap(enrichr_pivot[list(set(top_terms))], figsize=(20, 12), cbar_kws={"label": "-log10(p-value) of enrichment\nof differential genes"}, metric="correlation")
+            g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, ha="right", fontsize=4)
+            g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+            # g.fig.savefig(os.path.join(output_dir, "enrichr.%s.cluster_specific.svg" % gene_set_library), bbox_inches="tight")
+            g.fig.savefig(os.path.join(output_dir, "enrichr.%s.cluster_specific.png" % gene_set_library), bbox_inches="tight", dpi=300)
+
+            # plot clustered heatmap
+            g = sns.clustermap(enrichr_pivot[list(set(top_terms))], figsize=(20, 12), z_score=1, cbar_kws={"label": "Z-score of enrichment\nof differential genes"}, metric="correlation")
+            g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, ha="right", fontsize=4)
+            g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+            # g.fig.savefig(os.path.join(output_dir, "enrichr.%s.cluster_specific.z_score.svg" % gene_set_library), bbox_inches="tight")
+            g.fig.savefig(os.path.join(output_dir, "enrichr.%s.cluster_specific.z_score.png" % gene_set_library), bbox_inches="tight", dpi=300)
+
+    def accessibility_expression(
+            acce_dir="deseq_knockout",
+            expr_dir="deseq_expression_knockout",
+            trait="knockout"
+    ):
+        """
+        """
+        from scipy.stats import pearsonr
+        from statsmodels.nonparametric.smoothers_lowess import lowess
+
+        def signed_max(x, f=0.66):
+            """
+            Return maximum or minimum depending on the sign of the majority of values.
+            If there isn't a clear majority (at least `f` fraction in one side), return mean of values.
+            """
+            obs_f = max(sum(x < 0) / float(len(x)), sum(x > 0) / float(len(x)))
+            if obs_f >= f:
+                if sum(x < 0) > sum(x > 0):
+                    return min(x)
+                else:
+                    return max(x)
+            else:
+                return np.mean(x)
+
+        # read in accessibility
+        acce = pd.read_csv(os.path.join("results", acce_dir, acce_dir) + ".%s.annotated.csv" % trait)
+        acce['comparison'] = acce['comparison'].str.replace("-WT", "")
+
+        # split accessiblity by gene (shared regulatory elements will count twice)
+        acce_split = pd.DataFrame([pd.Series([row['log2FoldChange'], row['comparison'], g])
+                                   for _, row in acce.iterrows() for g in row['gene_name'].split(',')])
+        acce_split.columns = ['log2FoldChange', 'comparison', 'gene_name']
+        acce_split.to_csv(os.path.join("results", "accessibility.fold_changes.long_format.gene_split.csv"), index=False)
+
+        # pivot tables
+        acce_fc = pd.pivot_table(data=acce_split, values="log2FoldChange", index="gene_name", columns="comparison", aggfunc=signed_max)
+
+        expr = pd.read_csv(os.path.join("results", expr_dir, expr_dir) + ".%s.annotated.csv" % trait)
+        expr_fc = pd.pivot_table(data=expr, values="log2FoldChange", index="gene_name", columns="comparison", aggfunc=np.mean)
+
+        # save
+        acce_fc.to_csv(os.path.join("results", "accessibility.fold_changes.pivot.gene_split.signed_max.csv"), index=False)
+        expr_fc.to_csv(os.path.join("results", "expression.fold_changes.pivot.signed_max.csv"), index=False)
+
+        # match indexes (genes quantified)
+        expr_fc = expr_fc.ix[acce_fc.index].dropna()
+        acce_fc = acce_fc.ix[expr_fc.index].dropna().drop("WT_GFP", axis=1)
+
+        # Plot fold-changes in accessibility vs expression
+        # Using gene-level measurements for ATAC-seq
+        n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
+        fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
+        for i, ko in enumerate(expr_fc.columns):
+            print(ko)
+            # get values
+            a = expr_fc[ko]
+            b = acce_fc[ko]
+
+            # correlate
+            r, p = pearsonr(a, b)
+
+            # perform lowess
+            l = lowess(a, b, return_sorted=False)
+            dist = pd.DataFrame([abs(a - l), abs(b - l)]).mean()
+
+            # plot scatter
+            axis.flat[i].scatter(a, b, s=1, color=plt.cm.GnBu(dist))
+
+            # add title and correlation values
+            axis.flat[i].set_title(ko)
+            axis.flat[i].text(1, -5, s="r = {:.3f}\np = {:.3f}".format(r, p))
+
+            # # Color significant differently
+            # sig = expr_fc[(abs(a) > 1) & (abs(b) > 1)].index
+            # axis.flat[i].scatter(a.ix[sig], b.ix[sig], s=1, color=sns.color_palette("colorblind")[2])
+
+        axis[2, 0].set_ylabel("log2 fold-change (ATAC-seq)")
+        axis[4, 2].set_xlabel("log2 fold-change (RNA-seq)")
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.png"), bbox_inches="tight", dpi=300)
+
+        # Using the native many-to-one relationships for ATAC-seq
 
 
 def count_reads_in_intervals(bam, intervals):
@@ -2897,9 +3018,9 @@ def main():
     analysis = analysis.from_pickle()
 
     # work only with ATAC-seq samples
-    atacseq_samples = [sample for sample in prj.samples if sample.library == "ATAC-seq" and sample.cell_line in ["HAP1"]]
+    atacseq_samples = [sample for sample in analysis.samples if sample.library == "ATAC-seq" and sample.cell_line in ["HAP1"]]
     atacseq_samples = [s for s in atacseq_samples if os.path.exists(s.filtered)]  # and s.pass_qc == 1
-    rnaseq_samples = [sample for sample in prj.samples if sample.library == "RNA-seq" and sample.cell_line in ["HAP1"]]
+    rnaseq_samples = [sample for sample in analysis.samples if sample.library == "RNA-seq" and sample.cell_line in ["HAP1"]]
     rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(os.path.join(
                       sample.paths.sample_root, "bowtie1_{}".format(sample.transcriptome),
                       "bitSeq",
@@ -2949,13 +3070,12 @@ def main():
     # Supervised analysis
     analysis.differential_region_analysis(atacseq_samples)
 
-
     # RNA-seq
     analysis.get_gene_expression(samples=rnaseq_samples)
-
     # Unsupervised analysis
     analysis.unsupervised_expression(rnaseq_samples, attributes=["knockout", "replicate", "clone"])
-
+    # Supervised analysis
+    analusis.differential_expression_analysis()
 
 if __name__ == '__main__':
     try:
