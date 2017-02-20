@@ -15,7 +15,7 @@ global tk
 tk = NGSTk()
 
 
-def nucleoatac(bed_file, bam_file, fasta_file, output_basename, cpus=4):
+def nucleoatac(bed_file, bam_file, fasta_file, output_basename, cpus=8):
     """
     Decorator for some methods of Analysis class.
     """
@@ -24,7 +24,7 @@ def nucleoatac(bed_file, bam_file, fasta_file, output_basename, cpus=4):
 
     cmd = tk.slurm_header(
         "".join(["nucleoatac-", os.path.basename(output_basename)]), log_file,
-        cpus_per_task=cpus, time='2-00:00:00', queue="mediumq", mem_per_cpu=24000)
+        cpus_per_task=cpus, time='30-00:00:00', queue="longq", mem_per_cpu=24000)
 
     cmd += """
 
@@ -47,13 +47,60 @@ def nucleoatac(bed_file, bam_file, fasta_file, output_basename, cpus=4):
 \t\texport PATH=$ENV_DIR/install/bin:$PATH
 \t\texport PYTHONPATH=$ENV_DIR/install/lib/python2.7/site-packages
 
-\t\tnucleoatac run \
-\t\t--write_all \
-\t\t--cores {0} \
-\t\t--bed {1} \
-\t\t--bam {2} \
-\t\t--fasta {3} \
+
+\t\t# To run the whole nucleoatac procedure:
+
+\t\tnucleoatac run \\
+\t\t--write_all \\
+\t\t--cores {0} \\
+\t\t--bed {1} \\
+\t\t--bam {2} \\
+\t\t--fasta {3} \\
 \t\t--out {4}
+
+
+\t\t# To run each step separately:
+
+\t\t#nucleoatac occ \\
+\t\t#--cores {0} \\
+\t\t#--bed {1} \\
+\t\t#--bam {2} \\
+\t\t#--fasta {3} \\
+\t\t#--out {4}
+
+\t\t#nucleoatac nuc \\
+\t\t#--write_all \\
+\t\t#--cores {0} \\
+\t\t#--bed {1} \\
+\t\t#--vmat {4}.VMat \\
+\t\t#--occ_track {4}.occ.bedgraph.gz \\
+\t\t#--bam {2} \\
+\t\t#--fasta {3} \\
+\t\t#--out {4}
+
+\t\t#nucleoatac merge \\
+\t\t#--occpeaks {4}.occpeaks.bed.gz \\
+\t\t#--nucpos {4}.nucpos.bed.gz \\
+\t\t#--out {4}
+
+\t\t#nucleoatac nfr \\
+\t\t#--cores {0} \\
+\t\t#--bed {1} \\
+\t\t#--occ_track {4}.occ.bedgraph.gz \\
+\t\t#--calls {4}.nucmap_combined.bed.gz \\
+\t\t#--bam {2} \\
+\t\t#--fasta {3} \\
+\t\t#--out {4}
+
+\t\t#pyatac vplot \\
+\t\t#--out {4} \\
+\t\t#--cores {0} \\
+\t\t#--bed {1} \\
+\t\t#--bam {2} \\
+\t\t#--plot_extra \\
+\t\t#--lower 20 \\
+\t\t#--upper 750 \\
+\t\t#--flank 147
 
 \t\tdeactivate
 """.format(cpus, bed_file, bam_file, fasta_file, output_basename)
