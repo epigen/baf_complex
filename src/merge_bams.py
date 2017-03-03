@@ -11,6 +11,7 @@ import pandas as pd
 from looper.models import Project
 from pypiper import NGSTk
 import textwrap
+import re
 
 global tk
 tk = NGSTk()
@@ -94,12 +95,57 @@ def bamToBigWig(inputBam, outputBigWig, tagmented=False, normalize=True):
     tk.slurm_submit_job(job_file)
 
 
+def get_nucleosome_free_reads(bam, output_bam):
+    output_prefix = re.sub(".bam", "", bam)
+    job_file = output_prefix + ".get_nucfreads.sh"
+    log_file = output_prefix + ".get_nucfreads.log"
+
+    cmd = tk.slurm_header(
+        "get_nucleosome_free_reads." + output_prefix.split("/")[-1],
+        log_file,
+        cpus_per_task=2, time='10:00:00', queue="shortq", mem_per_cpu=8000)
+
+    cmd += """
+\t\tsambamba view -f bam -t 2 -o {0} -F "(template_length < 100) and (template_length > -100)" {1}
+""".format(output_bam, bam)
+
+    cmd += tk.slurm_footer()
+
+    # write job to file
+    with open(job_file, 'w') as handle:
+        handle.writelines(textwrap.dedent(cmd))
+
+    tk.slurm_submit_job(job_file)
+
+
+def get_nucleosome_reads(bam, output_bam):
+    output_prefix = re.sub(".bam", "", bam)
+    job_file = output_prefix + ".get_nucreads.sh"
+    log_file = output_prefix + ".get_nucreads.log"
+
+    cmd = tk.slurm_header(
+        "get_nucleosome_reads." + output_prefix.split("/")[-1],
+        log_file,
+        cpus_per_task=2, time='10:00:00', queue="shortq", mem_per_cpu=8000)
+
+    cmd += """
+\t\tsambamba view -f bam -t 2 -o {0} -F "((template_length > 180) and (template_length < 247)) or ((template_length < -180) and (template_length > -247))" {1}
+""".format(output_bam, bam)
+
+    cmd += tk.slurm_footer()
+
+    # write job to file
+    with open(job_file, 'w') as handle:
+        handle.writelines(textwrap.dedent(cmd))
+
+    tk.slurm_submit_job(job_file)
+
+
 def main():
     # Start project
     prj = Project("metadata/project_config.yaml")
-    prj.add_sample_sheet()
 
-    output_dir = os.path.join(prj.paths.results_subdir, "merged")
+    output_dir = os.path.join(prj.metadata.results_subdir, "merged")
     try:
         os.makedirs(output_dir)
     except:
@@ -117,6 +163,14 @@ def main():
         if not os.path.exists(merged_bam):
             merge_bams(bams, merged_bam)
 
+        # Split reads
+        if not os.path.exists(os.path.join(output_dir, name + ".nucleosome_reads.bam")):
+            get_nucleosome_free_reads(
+                os.path.join(output_dir, name + ".merged.sorted.bam"),
+                os.path.join(output_dir, name + ".nucleosome_free_reads.bam"))
+            get_nucleosome_reads(
+                os.path.join(output_dir, name + ".merged.sorted.bam"),
+                os.path.join(output_dir, name + ".nucleosome_reads.bam"))
 
 if __name__ == '__main__':
     try:
