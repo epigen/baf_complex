@@ -574,7 +574,7 @@ class Analysis(object):
         if samples is None:
             samples = [s for s in self.samples if s.library == "RNA-seq"]
 
-        self.count_matrix = collect_bitseq_output(self, samples)
+        self.count_matrix = self.collect_bitseq_output(samples)
 
         # Map ensembl gene IDs to gene names
         import requests
@@ -589,15 +589,23 @@ class Analysis(object):
             """</Dataset>""",
             """</Query>"""])
         req = requests.get(url_query, stream=True)
-        mapping = pd.DataFrame((x.strip().split(",") for x in list(req.iter_lines())), columns=["ensembl_gene_id", "gene_name"]).set_index("ensembl_gene_id").to_dict()['gene_name']
-        index = self.count_matrix.index.get_level_values('ensembl_gene_id').str.replace("\..*", "")
-        genes = [mapping[g] for g in index[index.isin(mapping.keys())]]
+        mapping = pd.DataFrame((x.strip().split(",") for x in list(req.iter_lines())), columns=["ensembl_gene_id", "gene_name"])
+        self.count_matrix = self.count_matrix.reset_index()
+        self.count_matrix['ensembl_gene_id'] = self.count_matrix['ensembl_gene_id'].str.replace("\..*", "")
 
-        self.count_matrix = self.count_matrix[index.isin(mapping.keys())]
-        self.count_matrix.index = pd.MultiIndex.from_arrays([genes, self.count_matrix.index.get_level_values('ensembl_gene_id')], names=['gene_name', "ensembl_transcript_id"])
+        self.count_matrix = pd.merge(self.count_matrix, mapping, how="outer").dropna()
+        self.count_matrix.to_csv(os.path.join(self.results_dir, self.name + ".expression_counts.csv"), index=False)
+
+        # Quantile normalize
+        self.matrix_qnorm = quantile_normalize(self.count_matrix.drop(["ensembl_transcript_id", "ensembl_gene_id", "gene_name"], axis=1))
+
+        # Log2 TPM
+        self.matrix_qnorm_log = np.log2((1 + self.matrix_qnorm) / self.matrix_qnorm.sum(axis=0) * 1e6)
+        self.matrix_qnorm_log = self.count_matrix[["gene_name", "ensembl_gene_id", "ensembl_transcript_id"]].join(self.matrix_qnorm_log)
+        self.matrix_qnorm_log.to_csv(os.path.join(self.results_dir, self.name + ".expression_counts.transcript_level.quantile_normalized.log2_tpm.csv"), index=False)
 
         # Reduce to gene-level measurements by max of transcripts
-        self.expression_matrix_counts = self.count_matrix.groupby(level=["gene_name"]).max()
+        self.expression_matrix_counts = self.count_matrix.drop(['ensembl_transcript_id'], axis=1).dropna().set_index(['ensembl_gene_id', 'gene_name']).groupby(level=["gene_name"]).max()
 
         # Quantile normalize
         self.expression_matrix_qnorm = quantile_normalize(self.expression_matrix_counts)
@@ -623,7 +631,6 @@ class Analysis(object):
         self.expression_annotated.columns = index
 
         # Save
-        self.count_matrix.to_csv(os.path.join(self.results_dir, self.name + ".expression_counts.csv"), index=True)
         self.expression_matrix_counts.to_csv(os.path.join(self.results_dir, self.name + ".expression_counts.gene_level.csv"), index=True)
         self.expression_matrix_qnorm.to_csv(os.path.join(self.results_dir, self.name + ".expression_counts.gene_level.quantile_normalized.csv"), index=True)
         self.expression.to_csv(os.path.join(self.results_dir, self.name + ".expression_counts.gene_level.quantile_normalized.log2_tpm.csv"), index=True)
@@ -3051,6 +3058,144 @@ def global_changes(samples, trait="knockout"):
             os.path.abspath(os.path.join(output_dir, "%s.metaplot" % region)),
             region=region
         )
+
+
+def nucleosome_changes(analysis, samples):
+    samples = [s for s in analysis.samples if s.library == "ATAC-seq"]
+
+    # select only ATAC-seq samples
+    df = analysis.prj.sheet.df[analysis.prj.sheet.df["library"] == "ATAC-seq"]
+
+    groups = list()
+    for attrs, index in df.groupby(["library", "cell_line", "knockout", "clone"]).groups.items():
+        name = "_".join([a for a in attrs if not pd.isnull(a)])
+        groups.append(name)
+    groups = sorted(groups)
+
+    # nucleosomes per sample
+    nucpos_metrics = {
+        "z-score": 4,
+        "nucleosome_occupancy_estimate": 5,
+        "lower_bound_for_nucleosome_occupancy_estimate": 6,
+        "upper_bound_for_nucleosome_occupancy_estimat": 7,
+        "log_likelihood_ratio": 8,
+        "normalized_nucleoatac_signal": 9,
+        "cross-correlation_signal_value_before_normalization": 10,
+        "number_of_potentially_nucleosome-sized_fragments": 11,
+        "number_of_fragments_smaller_than_nucleosome_sized": 12,
+        "fuzziness": 13
+    }
+    # nucleosome-free regions per sample
+    nfrpos_metrics = {
+        "mean_occupancy": 4,
+        "minimum_upper_bound_occupancy": 5,
+        "insertion_density": 6,
+        "bias_density": 7,
+    }
+    for data_type, metrics in [("nucpos", nucpos_metrics), ("nfrpos", nfrpos_metrics)]:
+        figs = list()
+        axizes = list()
+        for metric in metrics:
+            fig, axis = plt.subplots(5, 6, figsize=(6 * 4, 5 * 4), sharex=True, sharey=True)
+            figs.append(fig)
+            axizes.append(axis.flatten())
+
+        counts = pd.Series()
+        for i, group in enumerate(groups):
+            print(data_type, group)
+            s = pd.read_csv(
+                os.path.join("results", "nucleoatac", group, group + ".{}.bed.gz".format(data_type)),
+                sep="\t", header=None)
+            counts[group] = s.shape[0]
+
+            for j, (metric, col) in enumerate(metrics.items()):
+                print(data_type, group, metric, col)
+                sns.distplot(s[col - 1].dropna(), hist=False, ax=axizes[j][i])
+                axizes[j][i].set_title(group)
+
+        for i, metric in enumerate(metrics):
+            sns.despine(figs[i])
+            figs[i].savefig(os.path.join("results", "nucleoatac", "plots", "{}.{}.svg".format(data_type, metric)), bbox_inches="tight")
+
+        fig, axis = plt.subplots(1, 1, figsize=(1 * 4, 1 * 4))
+        sns.barplot(counts, counts.index, orient="horizontal", ax=axis, color=sns.color_palette("colorblind")[0])
+        axis.set_yticklabels(axis.get_yticklabels(), rotation=0)
+        axis.set_xlabel("Calls")
+        sns.despine(fig)
+        fig.savefig(os.path.join("results", "nucleoatac", "plots", "{}.count_per_sample.svg".format(data_type)), bbox_inches="tight")
+
+    # fragment distribution
+    for data_type in ["InsertionProfile", "InsertSizes", "fragmentsizes"]:
+        fig, axis = plt.subplots(5, 6, figsize=(6 * 4, 5 * 4))
+        axis = axis.flatten()
+
+        data = pd.DataFrame()
+        for i, group in enumerate(groups):
+            print(data_type, group)
+            s = pd.read_csv(
+                os.path.join("results", "nucleoatac", group, group + ".{}.txt".format(data_type)),
+                sep="\t", header=None, squeeze=True, skiprows=5 if data_type == "fragmentsizes" else 0)
+            if data_type == "InsertionProfile":
+                a = (len(s.index) - 1) / 2.
+                s.index = np.arange(-a, a + 1)
+            if data_type == "fragmentsizes":
+                s = s.squeeze()
+            data[group] = s
+
+            axis[i].plot(s)
+            axis[i].set_title(group)
+        sns.despine(fig)
+        fig.savefig(os.path.join("results", "nucleoatac", "plots", "{}.svg".format(data_type)), bbox_inches="tight")
+
+        norm_data = data.apply(lambda x: x / data['ATAC-seq_HAP1_WT_C631'])
+        if data_type == "fragmentsizes":
+            norm_data = norm_data.loc[50:, :]
+        fig, axis = plt.subplots(5, 6, figsize=(6 * 4, 5 * 4), sharey=True)
+        axis = axis.flatten()
+        for i, group in enumerate(groups):
+            print(data_type, group)
+            axis[i].plot(norm_data[group])
+            axis[i].set_title(group)
+        sns.despine(fig)
+        fig.savefig(os.path.join("results", "nucleoatac", "plots", "{}.WT_norm.svg".format(data_type)), bbox_inches="tight")
+
+    # Vplots and
+    # Vplots over WT
+    for data_type in ["VMat"]:
+        fig, axis = plt.subplots(5, 6, figsize=(6 * 4, 5 * 4))
+        fig2, axis2 = plt.subplots(5, 6, figsize=(6 * 4, 5 * 4), sharey=True)
+        axis = axis.flatten()
+        axis2 = axis2.flatten()
+
+        group = 'ATAC-seq_HAP1_WT_C631'
+        wt = pd.read_csv(
+            os.path.join("results", "nucleoatac", group, group + ".{}".format(data_type)),
+            sep="\t", header=None, skiprows=7)
+        wt.index = np.arange(20, 750)
+        a = (len(wt.columns) - 1) / 2.
+        wt.columns = np.arange(-a, a + 1)
+        wt = wt.loc[0:300, :]
+
+        for i, group in enumerate(groups):
+            print(data_type, group)
+            m = pd.read_csv(
+                os.path.join("results", "nucleoatac", group, group + ".{}".format(data_type)),
+                sep="\t", header=None, skiprows=7)
+            m.index = np.arange(20, 750)
+            a = (len(m.columns) - 1) / 2.
+            m.columns = np.arange(-a, a + 1)
+            m = m.loc[0:300, :]
+
+            n = m / wt
+
+            axis[i].imshow(m.sort_index(ascending=False))
+            axis[i].set_title(group)
+            axis2[i].imshow(n.sort_index(ascending=False))
+            axis2[i].set_title(group)
+        sns.despine(fig)
+        sns.despine(fig2)
+        fig.savefig(os.path.join("results", "nucleoatac", "plots", "{}.svg".format(data_type)), bbox_inches="tight")
+        fig2.savefig(os.path.join("results", "nucleoatac", "plots", "{}.WT_norm.svg".format(data_type)), bbox_inches="tight")
 
 
 def add_args(parser):
