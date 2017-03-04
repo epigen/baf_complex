@@ -1331,7 +1331,7 @@ class Analysis(object):
         samples = [s for s in samples if s.name in self.expression_annotated.columns.get_level_values("sample_name") and s.library == "RNA-seq" and s.cell_line == "HAP1"]
 
         color_dataframe = pd.DataFrame(
-            get_level_colors(self, index=self.expression_annotated.columns, levels=attributes), index=attributes,
+            self.get_level_colors(index=self.expression_annotated.columns, levels=attributes), index=attributes,
             columns=self.expression_annotated.columns.get_level_values("sample_name"))
 
         # exclude samples if needed
@@ -3160,6 +3160,7 @@ def nucleosome_changes(analysis, samples):
         fig.savefig(os.path.join("results", "nucleoatac", "plots", "{}.WT_norm.svg".format(data_type)), bbox_inches="tight")
 
     # Vplots and
+    v_min, v_max = (105, 251)
     # Vplots over WT
     for data_type in ["VMat"]:
         fig, axis = plt.subplots(5, 6, figsize=(6 * 4, 5 * 4))
@@ -3171,7 +3172,7 @@ def nucleosome_changes(analysis, samples):
         wt = pd.read_csv(
             os.path.join("results", "nucleoatac", group, group + ".{}".format(data_type)),
             sep="\t", header=None, skiprows=7)
-        wt.index = np.arange(20, 750)
+        wt.index = np.arange(v_min, v_max)
         a = (len(wt.columns) - 1) / 2.
         wt.columns = np.arange(-a, a + 1)
         wt = wt.loc[0:300, :]
@@ -3181,7 +3182,7 @@ def nucleosome_changes(analysis, samples):
             m = pd.read_csv(
                 os.path.join("results", "nucleoatac", group, group + ".{}".format(data_type)),
                 sep="\t", header=None, skiprows=7)
-            m.index = np.arange(20, 750)
+            m.index = np.arange(v_min, v_max)
             a = (len(m.columns) - 1) / 2.
             m.columns = np.arange(-a, a + 1)
             m = m.loc[0:300, :]
@@ -3235,52 +3236,58 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
         return pd.Series([series[0], mid - (width / 2), (mid + 1) + (width / 2)])
 
     # Regions to look at
-    regions = dict()
-    # All accessible sites
-    out = os.path.join(self.results_dir, "nucleoatac", "all_sites.bed")
-    center_window(self.sites).to_dataframe()[['chrom', 'start', 'end']].to_csv(out, index=False, header=None, sep="\t")
-    regions["all_sites"] = out
+    regions_pickle = os.path.join(self.results_dir, "nucleoatac", "all_types_of_regions.pickle")
+    if os.path.exists():
+        regions = pickle.load(open(regions_pickle), "rb")
+    else:
+        regions = dict()
+        # All accessible sites
+        out = os.path.join(self.results_dir, "nucleoatac", "all_sites.bed")
+        center_window(self.sites).to_dataframe()[['chrom', 'start', 'end']].to_csv(out, index=False, header=None, sep="\t")
+        regions["all_sites"] = out
 
-    # get bed file of promoter proximal sites
-    promoter_sites = os.path.join(self.results_dir, "nucleoatac", "promoter_proximal.bed")
-    self.coverage_annotated[self.coverage_annotated['distance'].astype(int) < 5000][['chrom', 'start', 'end']].to_csv(
-        promoter_sites, index=False, header=None, sep="\t")
-    regions["promoter"] = promoter_sites
+        # get bed file of promoter proximal sites
+        promoter_sites = os.path.join(self.results_dir, "nucleoatac", "promoter_proximal.bed")
+        self.coverage_annotated[self.coverage_annotated['distance'].astype(int) < 5000][['chrom', 'start', 'end']].to_csv(
+            promoter_sites, index=False, header=None, sep="\t")
+        regions["promoter"] = promoter_sites
 
-    # All accessible sites - that are distal
-    out = os.path.join(self.results_dir, "nucleoatac", "distal_sites.bed")
-    center_window(self.sites.intersect(pybedtools.BedTool(promoter_sites), v=True, wa=True)).to_dataframe()[['chrom', 'start', 'end']].to_csv(out, index=False, header=None, sep="\t")
-    regions["distal_sites"] = out
+        # All accessible sites - that are distal
+        out = os.path.join(self.results_dir, "nucleoatac", "distal_sites.bed")
+        center_window(self.sites.intersect(pybedtools.BedTool(promoter_sites), v=True, wa=True)).to_dataframe()[['chrom', 'start', 'end']].to_csv(out, index=False, header=None, sep="\t")
+        regions["distal_sites"] = out
 
-    # Differential sites
-    diff = pd.read_csv(os.path.join("results", "deseq_knockout", "deseq_knockout.knockout.csv"), index_col=0)
-    diff = diff[(diff["padj"] < 0.01) & (abs(diff["log2FoldChange"]) > 1.)]
+        # Differential sites
+        diff = pd.read_csv(os.path.join("results", "deseq_knockout", "deseq_knockout.knockout.csv"), index_col=0)
+        diff = diff[(diff["padj"] < 0.01) & (abs(diff["log2FoldChange"]) > 1.)]
 
-    # Loosing accessibility with ARID1A/SMARCA4 KO
-    less_ARID1ASMARCA4 = get_differential(
-        diff,
-        ['ARID1A-WT', 'SMARCA4-WT'],
-        [(np.less_equal, -1), (np.less_equal, -1)]).apply(center_series, axis=1)
-    out = os.path.join(self.results_dir, "nucleoatac", "diff_sites.less_ARID1ASMARCA4.bed")
-    less_ARID1ASMARCA4.to_csv(out, index=False, header=None, sep="\t")
-    regions["diff_sites.less_ARID1ASMARCA4"] = out
+        # Loosing accessibility with ARID1A/SMARCA4 KO
+        less_ARID1ASMARCA4 = get_differential(
+            diff,
+            ['ARID1A-WT', 'SMARCA4-WT'],
+            [(np.less_equal, -1), (np.less_equal, -1)]).apply(center_series, axis=1)
+        out = os.path.join(self.results_dir, "nucleoatac", "diff_sites.less_ARID1ASMARCA4.bed")
+        less_ARID1ASMARCA4.to_csv(out, index=False, header=None, sep="\t")
+        regions["diff_sites.less_ARID1ASMARCA4"] = out
 
-    # Gaining accessibility with ARID1A/SMARCA4 KO
-    more_ARID1ASMARCA4 = get_differential(
-        diff,
-        ['ARID1A-WT', 'SMARCA4-WT'],
-        [(np.greater_equal, 1), (np.greater_equal, 1)]).apply(center_series, axis=1)
-    out = os.path.join(self.results_dir, "nucleoatac", "diff_sites.more_ARID1ASMARCA4.bed")
-    more_ARID1ASMARCA4.to_csv(out, index=False, header=None, sep="\t")
-    regions["diff_sites.more_ARID1ASMARCA4"] = out
+        # Gaining accessibility with ARID1A/SMARCA4 KO
+        more_ARID1ASMARCA4 = get_differential(
+            diff,
+            ['ARID1A-WT', 'SMARCA4-WT'],
+            [(np.greater_equal, 1), (np.greater_equal, 1)]).apply(center_series, axis=1)
+        out = os.path.join(self.results_dir, "nucleoatac", "diff_sites.more_ARID1ASMARCA4.bed")
+        more_ARID1ASMARCA4.to_csv(out, index=False, header=None, sep="\t")
+        regions["diff_sites.more_ARID1ASMARCA4"] = out
 
-    # TFBSs
-    tfs = ["CTCF", "BCL", "SMARC", "POU5F1", "SOX2", "NANOG"]
-    for tf in tfs:
-        tf_bed = pybedtools.BedTool("/home/arendeiro/resources/genomes/hg19/motifs/TFs/{}.true.bed".format(tf))
-        out = os.path.join(self.results_dir, "nucleoatac", "tfbs.%s.bed" % tf)
-        center_window(tf_bed.intersect(self.sites, wa=True)).to_dataframe()[['chrom', 'start', 'end']].to_csv(out, index=False, header=None, sep="\t")
-        regions["tfbs.%s" % tf] = out
+        # TFBSs
+        tfs = ["CTCF", "BCL", "SMARC", "POU5F1", "SOX2", "NANOG"]
+        for tf in tfs:
+            tf_bed = pybedtools.BedTool("/home/arendeiro/resources/genomes/hg19/motifs/TFs/{}.true.bed".format(tf))
+            out = os.path.join(self.results_dir, "nucleoatac", "tfbs.%s.bed" % tf)
+            center_window(tf_bed.intersect(self.sites, wa=True)).to_dataframe()[['chrom', 'start', 'end']].to_csv(out, index=False, header=None, sep="\t")
+            regions["tfbs.%s" % tf] = out
+
+        pickle.dump(regions, open(regions_pickle, "wb"))
 
     # Launch jobs
     for group in groups:
@@ -3298,10 +3305,81 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
             for label, signal_file in signal_files:
                 print(group, region_name, label)
                 # run job
-                # run_coverage_job(bed_file, signal_file, label, ".".join([group, region_name, label]), output_dir)
+                run_coverage_job(bed_file, signal_file, label, ".".join([group, region_name, label]), output_dir)
                 # run vplot
                 if label == "signal":
                     run_vplot_job(bed_file, signal_file, ".".join([group, region_name, label]), output_dir)
+
+    # Collect signals
+    signals = pd.DataFrame(columns=['group', 'region', 'label'])
+    signals = pd.read_csv(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.csv"))
+
+    for group in groups:
+        output_dir = os.path.join(self.results_dir, "nucleoatac", group)
+        signal_files = [
+            ("signal", os.path.join(self.data_dir, "merged", group + ".merged.sorted.bam")),
+            ("nucleosome", os.path.join(self.data_dir, "merged", group + ".nucleosome_reads.bam")),
+            ("nucleosome_free", os.path.join(self.data_dir, "merged", group + ".nucleosome_free_reads.bam")),
+            ("nucleoatac", os.path.join("results", "nucleoatac", group, group + ".nucleoatac_signal.smooth.bedgraph.gz")),
+            ("dyads", os.path.join("results", "nucleoatac", group, group + ".nucpos.bed.gz"))
+        ]
+        for region_name, bed_file in regions.items():
+            for label, signal_file in signal_files:
+                # Skip already done
+                if len(signals[
+                        (signals["group"] == group) &
+                        (signals["region"] == region_name) &
+                        (signals["label"] == label)
+                ]) > 0:
+                    print("Continuing", group, region_name, label)
+                    continue
+
+                print(group, region_name, label)
+                df = pd.read_csv(os.path.join(output_dir, "{}.coverage_matrix.csv".format(".".join([group, region_name, label, label]))), index_col=0)
+                df = df.mean(0).reset_index(name="value").rename(columns={"index": "distance"})
+                df["group"] = group
+                df["region"] = region_name
+                df["label"] = label
+                signals = signals.append(df, ignore_index=True)
+    signals.to_csv(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.csv"), index=False)
+
+    signals = pd.read_csv(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.csv"))
+
+    signals = signals[(signals["distance"] > -400) & (signals["distance"] < 400)]
+
+    # plot together
+    region_order = sorted(signals["region"].unique(), reverse=True)
+    group_order = sorted(signals["group"].unique(), reverse=True)
+    label_order = sorted(signals["label"].unique(), reverse=True)
+
+    # raw
+    g = sns.FacetGrid(signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
+    g.map(plt.plot, "distance", "value")
+    g.add_legend()
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.raw_mean_coverage.svg"), bbox_inches="tight")
+
+    # normalized
+    signals["norm_values"] = signals.groupby(["region", "label", "group"])["value"].apply(lambda x: (x - x.mean()) / x.std())
+
+    g = sns.FacetGrid(signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
+    g.map(plt.plot, "distance", "norm_values")
+    g.add_legend()
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.norm_mean_coverage.svg"), bbox_inches="tight")
+
+    # normalized smoothed
+    signals["norm_smooth_values"] = signals.groupby(["region", "label", "group"])["value"].apply(lambda x: pd.rolling_window(((x - x.mean()) / x.std()), 10))
+
+    g = sns.FacetGrid(signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
+    g.map(plt.plot, "distance", "norm_smooth_values")
+    g.add_legend()
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.norm_mean_coverage.smooth.svg"), bbox_inches="tight")
+
+    #
+    # only open chromatin
+    g = sns.FacetGrid(signals[signals["region"] == "open_chrom"], hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, sharex=False, sharey=False)
+    g.map(plt.plot, "distance", "norm_smooth_values")
+    g.add_legend()
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "open_chromatin_coverage.norm_mean_coverage.smooth.svg"), bbox_inches="tight")
 
 
 def run_coverage_job(bed_file, bam_file, coverage_type, name, output_dir):
