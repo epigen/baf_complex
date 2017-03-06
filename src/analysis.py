@@ -1705,6 +1705,45 @@ class Analysis(object):
         sns.despine(fig)
         fig.savefig(os.path.join(output_dir, "%s.%s.ma_plots.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
+        # Pairwise scatter plots of differential genes
+        import itertools
+        new_groups = [g for g in groups if "ARID"in g or "SMARC" in g]
+        n_rows = n_cols = int(np.ceil(np.sqrt(len(list(itertools.combinations(new_groups, 2))))))
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 4, n_rows * 4), sharex=True, sharey=True)
+        axes = iter(axes.flatten())
+        for cond1, cond2 in sorted(itertools.combinations(new_groups, 2)):
+            diff1 = set(diff[diff["comparison"] == cond1].index)
+            diff2 = set(diff[diff["comparison"] == cond2].index)
+
+            if (len(diff1) == 0) or (len(diff2) == 0):
+                continue
+            print(cond1, cond2)
+            axis = axes.next()
+
+            # get union of differential regions
+            inter = diff1.intersection(diff2)
+            exc1 = diff1.difference(diff2)
+            exc2 = diff2.difference(diff1)
+
+            dots = list(exc1) + list(exc2)
+            colors = ["red" for _ in exc1] + ["green" for _ in exc2]
+            d = pd.DataFrame([dots, colors], index=["region", "color"]).T.sample(frac=1)
+            df1 = df[df["comparison"] == cond1].ix[d['region']]
+            df2 = df[df["comparison"] == cond2].ix[d['region']]
+            axis.scatter(np.log2(1 + df1[cond1]), np.log2(1 + df2[cond2]), alpha=0.5, color=d['color'], s=5)
+            df1 = df[df["comparison"] == cond1].ix[inter]
+            df2 = df[df["comparison"] == cond2].ix[inter]
+            axis.scatter(np.log2(1 + df1[cond1]), np.log2(1 + df2[cond2]), alpha=0.85, color="orange", s=15)
+            axis.set_xlabel(cond1)
+            axis.set_ylabel(cond2)
+
+            # add X=Y line
+            m = max(np.log2(1 + df2[cond1]).max(), np.log2(1 + df2[cond2]).max())
+            axis.plot([0, m], [0, m], color="black", alpha=0.8, linestyle="--")
+        sns.despine(fig)
+        fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+
         # save unique differential regions
         diff2 = diff[groups].ix[diff.index.unique()].drop_duplicates()
         diff2.to_csv(os.path.join(output_dir, "%s.%s.differential_regions.csv" % (output_suffix, trait)))
@@ -3061,8 +3100,6 @@ def global_changes(samples, trait="knockout"):
 
 
 def nucleosome_changes(analysis, samples):
-    samples = [s for s in analysis.samples if s.library == "ATAC-seq"]
-
     # select only ATAC-seq samples
     df = analysis.prj.sheet.df[analysis.prj.sheet.df["library"] == "ATAC-seq"]
 
@@ -3356,7 +3393,7 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
     g = sns.FacetGrid(signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
     g.map(plt.plot, "distance", "value")
     g.add_legend()
-    g.savefig(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.raw_mean_coverage.svg"), bbox_inches="tight")
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.raw_mean_coverage.svg"), bbox_inches="tight")
 
     # normalized
     signals["norm_values"] = signals.groupby(["region", "label", "group"])["value"].apply(lambda x: (x - x.mean()) / x.std())
@@ -3364,7 +3401,7 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
     g = sns.FacetGrid(signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
     g.map(plt.plot, "distance", "norm_values")
     g.add_legend()
-    g.savefig(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.norm_mean_coverage.svg"), bbox_inches="tight")
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.norm_mean_coverage.svg"), bbox_inches="tight")
 
     # normalized smoothed
     signals["norm_smooth_values"] = signals.groupby(["region", "label", "group"])["value"].apply(lambda x: pd.rolling_window(((x - x.mean()) / x.std()), 10))
@@ -3372,14 +3409,7 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
     g = sns.FacetGrid(signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
     g.map(plt.plot, "distance", "norm_smooth_values")
     g.add_legend()
-    g.savefig(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.norm_mean_coverage.smooth.svg"), bbox_inches="tight")
-
-    #
-    # only open chromatin
-    g = sns.FacetGrid(signals[signals["region"] == "open_chrom"], hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, sharex=False, sharey=False)
-    g.map(plt.plot, "distance", "norm_smooth_values")
-    g.add_legend()
-    g.savefig(os.path.join(self.results_dir, "nucleoatac", "open_chromatin_coverage.norm_mean_coverage.smooth.svg"), bbox_inches="tight")
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.norm_mean_coverage.smooth.svg"), bbox_inches="tight")
 
 
 def phasograms(self, samples, max_dist=10000, rolling_window=50, plotting_window=(0, 500)):
@@ -3411,32 +3441,90 @@ def phasograms(self, samples, max_dist=10000, rolling_window=50, plotting_window
         distances[group] = dists
 
     pickle.dump(distances, open(os.path.join(self.results_dir, "nucleoatac", "phasogram.distances.pickle"), "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+    distances = pickle.load(open(os.path.join(self.results_dir, "nucleoatac", "phasogram.distances.pickle"), "rb"))
 
+    # Plot distances between dyads
+    from scipy.ndimage.filters import gaussian_filter1d
+    n_rows = n_cols = int(np.ceil(np.sqrt(len(groups))))
+    n_rows -= 1
+    fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(n_cols * 3, n_rows * 2))
+    fig2, axis2 = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(n_cols * 3, n_rows * 2))
+    axis = axis.flatten()
+    axis2 = axis2.flatten()
+    for i, group in enumerate(groups):
+        # Count frequency of dyad distances
+        x = pd.Series(distances[group])
+        y = x.value_counts().sort_index()
+        y = y.ix[range(plotting_window[0], plotting_window[1])]
+        y /= y.sum()
+
+        # Find peaks
+        y2 = pd.Series(gaussian_filter1d(y, 5), index=y.index)
+        peak_indices = detect_peaks(y2.values, mpd=73.5)[:3]
+        print(group, y2.iloc[peak_indices].index)
+
+        # Plot distribution and peaks
+        axis[i].plot(y.index, y, color="black", alpha=0.6, linewidth=0.5)
+        axis[i].plot(y2.index, y2, color=sns.color_palette("colorblind")[0], linewidth=1)
+        axis[i].scatter(y2.iloc[peak_indices].index, y2.iloc[peak_indices], s=25, color="orange")
+        for peak in y2.iloc[peak_indices].index:
+            axis[i].axvline(peak, color="black", linestyle="--")
+        axis[i].set_title(group)
+
+        # Transform into distances between nucleosomes
+        # Plot distribution and peaks
+        axis2[i].plot(y.index - 147, y, color="black", alpha=0.6, linewidth=0.5)
+        axis2[i].plot(y2.index - 147, y2, color=sns.color_palette("colorblind")[0], linewidth=1)
+        axis2[i].scatter(y2.iloc[peak_indices].index - 147, y2.iloc[peak_indices], s=25, color="orange")
+        for peak in y2.iloc[peak_indices].index:
+            axis2[i].axvline(peak - 147, color="black", linestyle="--")
+        axis2[i].set_title(group)
+    sns.despine(fig)
+    sns.despine(fig2)
+    fig.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "phasograms.dyad_distances.peaks.svg"), bbox_inches="tight")
+    fig2.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "phasograms.nucleosome_distances.peaks.svg"), bbox_inches="tight")
+
+    # Get NFR per knockout
+    lengths = dict()
+
+    for group in groups:
+        print(group)
+        # Get NFR calls from nucleoatac
+        df = pd.read_csv(os.path.join(self.results_dir, "nucleoatac", group, group + ".nfrpos.bed.gz"), sep="\t", header=None)
+        # Get lengths
+        lengths[group] = (df[2] - df[1]).tolist()
+
+    pickle.dump(lengths, open(os.path.join(self.results_dir, "nucleoatac", "nfr.lengths.pickle"), "wb"), protocol=pickle.HIGHEST_PROTOCOL)
+    lengths = pickle.load(open(os.path.join(self.results_dir, "nucleoatac", "nfr.lengths.pickle"), "rb"))
+
+    # plot NFR lengths
+    from scipy.ndimage.filters import gaussian_filter1d
     n_rows = n_cols = int(np.ceil(np.sqrt(len(groups))))
     n_rows -= 1
     fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(n_cols * 3, n_rows * 2))
     axis = axis.flatten()
     for i, group in enumerate(groups):
-        # Count frequency of dyad distances
-        x = pd.Series(distances[group])
+        # Count NFR lengths
+        x = pd.Series(lengths[group])
         y = x.value_counts().sort_index()
-        y = y.ix[plotting_window[0], plotting_window[1]]
+        y = y.ix[range(plotting_window[0], 300)]
         y /= y.sum()
 
         # Find peaks
-        y2 = y.rolling(rolling_window).mean()
-        y2.index = y2.index - rolling_window
-        peak_indices = detect_peaks(y2.values, mpd=73.5)[:3]
+        y2 = pd.Series(gaussian_filter1d(y, 5), index=y.index)
+        peak_indices = [detect_peaks(y2.values, mpd=73.5)[0]]
         print(group, y2.iloc[peak_indices].index)
 
         # Plot distribution and peaks
-        axis[i].plot(y2.index, y2)
+        axis[i].plot(y.index, y, color="black", alpha=0.6, linewidth=0.5)
+        axis[i].plot(y2.index, y2, color=sns.color_palette("colorblind")[0], linewidth=1)
         axis[i].scatter(y2.iloc[peak_indices].index, y2.iloc[peak_indices], s=25, color="orange")
         for peak in y2.iloc[peak_indices].index:
             axis[i].axvline(peak, color="black", linestyle="--")
         axis[i].set_title(group)
+
     sns.despine(fig)
-    fig.savefig(os.path.join(self.results_dir, "nucleoatac", "phasograms.50bp_rolling_mean.peaks.svg"), bbox_inches="tight")
+    fig.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "phasograms.nfr_lengths.peaks.svg"), bbox_inches="tight")
 
 
 def run_coverage_job(bed_file, bam_file, coverage_type, name, output_dir):
