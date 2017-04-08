@@ -932,6 +932,7 @@ class Analysis(object):
         import itertools
         from scipy.stats import kruskal
         from scipy.stats import pearsonr
+        pearsonr
 
         color_dataframe = pd.DataFrame(self.get_level_colors(levels=attributes), index=attributes, columns=[s.name for s in self.samples])
 
@@ -1080,7 +1081,8 @@ class Analysis(object):
                     indexes = [i for i, s in enumerate(samples) if s in sel_samples]
                     pc_values = xx.loc[indexes, pc]
                     trait_values = [getattr(s, attr) for s in sel_samples]
-                    p = pearsonr(pc_values, trait_values)[1]
+                    from scipy.stats import pearsonr
+                    pearsonr
 
                     associations.append([pc + 1, attr, variable_type, np.nan, np.nan, p])
 
@@ -1327,6 +1329,7 @@ class Analysis(object):
         import itertools
         from scipy.stats import kruskal
         from scipy.stats import pearsonr
+        pearsonr
 
         samples = [s for s in samples if s.name in self.expression_annotated.columns.get_level_values("sample_name") and s.library == "RNA-seq" and s.cell_line == "HAP1"]
 
@@ -1479,7 +1482,8 @@ class Analysis(object):
                     indexes = [i for i, s in enumerate(samples) if s in sel_samples]
                     pc_values = xx.loc[indexes, pc]
                     trait_values = [getattr(s, attr) for s in sel_samples]
-                    p = pearsonr(pc_values, trait_values)[1]
+                    from scipy.stats import pearsonr
+                    pearsonr
 
                     associations.append([pc + 1, attr, variable_type, np.nan, np.nan, p])
 
@@ -1707,8 +1711,10 @@ class Analysis(object):
 
         # Pairwise scatter plots of differential genes
         import itertools
-        new_groups = [g for g in groups if "ARID"in g or "SMARC" in g]
+        new_groups = [g for g in groups if "ARID" in g or "SMARC" in g]
         n_rows = n_cols = int(np.ceil(np.sqrt(len(list(itertools.combinations(new_groups, 2))))))
+
+        # with accessibility values
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 4, n_rows * 4), sharex=True, sharey=True)
         axes = iter(axes.flatten())
         for cond1, cond2 in sorted(itertools.combinations(new_groups, 2)):
@@ -1743,6 +1749,49 @@ class Analysis(object):
         sns.despine(fig)
         fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
         fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+
+        # with fold-change values
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 4, n_rows * 4), sharex=True, sharey=True)
+        axes = iter(axes.flatten())
+        for cond1, cond2 in sorted(itertools.combinations(new_groups, 2)):
+            diff1 = set(diff[diff["comparison"] == cond1].index)
+            diff2 = set(diff[diff["comparison"] == cond2].index)
+
+            if (len(diff1) == 0) or (len(diff2) == 0):
+                continue
+            print(cond1, cond2)
+            axis = axes.next()
+
+            # get union of differential regions
+            inter = diff1.intersection(diff2)
+            exc1 = diff1.difference(diff2)
+            exc2 = diff2.difference(diff1)
+
+            dots = list(exc1) + list(exc2)
+            colors = ["red" for _ in exc1] + ["green" for _ in exc2]
+            d = pd.DataFrame([dots, colors], index=["region", "color"]).T.sample(frac=1)
+            df1 = df[df["comparison"] == cond1].ix[d['region']]
+            df2 = df[df["comparison"] == cond2].ix[d['region']]
+            axis.scatter(df1["log2FoldChange"], df2["log2FoldChange"], alpha=0.5, color=d['color'], s=5)
+            df1 = df[df["comparison"] == cond1].ix[inter]
+            df2 = df[df["comparison"] == cond2].ix[inter]
+            axis.scatter(df1["log2FoldChange"], df2["log2FoldChange"], alpha=0.85, color="orange", s=15)
+            axis.set_xlabel(cond1)
+            axis.set_ylabel(cond2)
+
+            # add 0 lines
+            axis.axhline(0, color="black", alpha=0.8, linestyle="--")
+            axis.axvline(0, color="black", alpha=0.8, linestyle="--")
+
+            # add text with correlation
+            _all = d['region'].tolist() + list(inter)
+            from scipy.stats import pearsonr
+            r, p = pearsonr(df[df["comparison"] == cond1].ix[_all]["log2FoldChange"], df[df["comparison"] == cond2].ix[_all]["log2FoldChange"])
+            axis.text(0.1, -3, "Pearson's r:{}".format(r))
+
+        sns.despine(fig)
+        fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.fold_change.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.fold_change.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         # save unique differential regions
         diff2 = diff[groups].ix[diff.index.unique()].drop_duplicates()
@@ -2536,6 +2585,7 @@ class Analysis(object):
         """
         """
         from scipy.stats import pearsonr
+        pearsonr
         from statsmodels.nonparametric.smoothers_lowess import lowess
 
         def signed_max(x, f=0.66):
@@ -2587,7 +2637,8 @@ class Analysis(object):
             b = acce_fc[ko]
 
             # correlate
-            r, p = pearsonr(a, b)
+            from scipy.stats import pearsonr
+            pearsonr
 
             # fit lowess
             if i == 0:
@@ -3275,7 +3326,7 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
     # Regions to look at
     regions_pickle = os.path.join(self.results_dir, "nucleoatac", "all_types_of_regions.pickle")
     if os.path.exists():
-        regions = pickle.load(open(regions_pickle), "rb")
+        regions = pickle.load(open(regions_pickle, "rb"))
     else:
         regions = dict()
         # All accessible sites
@@ -3349,7 +3400,7 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
 
     # Collect signals
     signals = pd.DataFrame(columns=['group', 'region', 'label'])
-    signals = pd.read_csv(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.csv"))
+    # signals = pd.read_csv(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.csv"))
 
     for group in groups:
         output_dir = os.path.join(self.results_dir, "nucleoatac", group)
@@ -3410,6 +3461,92 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
     g.map(plt.plot, "distance", "norm_smooth_values")
     g.add_legend()
     g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.norm_mean_coverage.smooth.svg"), bbox_inches="tight")
+
+    #
+    # specific regions/samples
+    specific_signals = signals[
+        (signals["group"].str.contains("ARID1|SMARCA|WT")) &
+        (~signals["group"].str.contains("OV90|GFP")) &
+
+        (signals["region"].str.contains("diff_sites")) &
+
+        (signals["label"] == "nucleoatac")
+    ]
+
+    region_order = sorted(specific_signals["region"].unique(), reverse=True)
+    group_order = sorted(specific_signals["group"].unique(), reverse=True)
+    label_order = sorted(specific_signals["label"].unique(), reverse=True)
+
+    g = sns.FacetGrid(specific_signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
+    g.map(plt.plot, "distance", "value")
+    g.add_legend()
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.svg"), bbox_inches="tight")
+
+    # normalized (centered), zoom in center
+    specific_signals["norm_values"] = specific_signals.groupby(["region", "label", "group"])["value"].apply(lambda x: (x - x.mean()) / x.std())
+    specific_signals = specific_signals[
+        (specific_signals["distance"] < 200) &
+        (specific_signals["distance"] > -200)]
+    g = sns.FacetGrid(specific_signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
+    g.map(plt.plot, "distance", "norm_values")
+    g.add_legend()
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.norm.svg"), bbox_inches="tight")
+
+    #
+
+    # Violinplots of nucleosome occupancies
+
+    # Heatmap of nucleosome occupancies
+    # Collect signals
+    sel_groups = [x for x in groups if "OV90" not in x and "GFP" not in x and ("ARID1" in x or "SMARCA" in x or "WT" in x)]
+    regions = pickle.load(open(regions_pickle, "rb"))
+    sel_regions = {k: v for k, v in regions.items() if "diff" in k}
+
+    # get parameters based on WT accessibility
+    region_order = dict()
+    region_vmax = dict()
+    region_norm_vmax = dict()
+    output_dir = os.path.join(self.results_dir, "nucleoatac", "ATAC-seq_HAP1_WT_C631")
+    for region_name in sel_regions.keys():
+        df = pd.read_csv(os.path.join(output_dir, "{}.coverage_matrix.csv".format(".".join(["ATAC-seq_HAP1_WT_C631", region_name, "nucleoatac", "nucleoatac"]))), index_col=0)
+        # vmax
+        region_vmax[region_name] = np.percentile(df, 95)
+        region_norm_vmax[region_name] = np.percentile((df - df.mean(0)) / df.std(0), 95)
+        # region order
+        region_order[region_name] = df.sum(axis=1).sort_values().index  # sorted by mean
+        # region_order[region_name] = g.dendrogram_row.dendrogram
+
+    # plot all
+    fig, axis = plt.subplots(len(sel_regions), len(sel_groups), figsize=(len(sel_groups) * 4, len(sel_regions) * 4))
+    fig2, axis2 = plt.subplots(len(sel_regions), len(sel_groups), figsize=(len(sel_groups) * 4, len(sel_regions) * 4))
+    for j, group in enumerate(sorted(sel_groups, reverse=True)):
+        output_dir = os.path.join(self.results_dir, "nucleoatac", group)
+        signal_files = [
+            ("nucleoatac", os.path.join("results", "nucleoatac", group, group + ".nucleoatac_signal.smooth.bedgraph.gz"))
+        ]
+        for i, (region_name, bed_file) in enumerate(sel_regions.items()):
+            for label, signal_file in signal_files:
+                print(group, region_name, label)
+                df = pd.read_csv(os.path.join(output_dir, "{}.coverage_matrix.csv".format(".".join([group, region_name, label, label]))), index_col=0)
+
+                d = df.ix[region_order[region_name]]
+                axis[i, j].imshow(
+                    d,
+                    norm=None, cmap="inferno", vmax=region_vmax[region_name], extent=[-500, 500, 0, 10], aspect="auto")  # aspect=100
+                d_norm = (d - d.mean(0)) / d.std(0)
+                axis2[i, j].imshow(
+                    d_norm,
+                    norm=None, cmap="inferno", vmax=region_norm_vmax[region_name], extent=[-500, 500, 0, 10], aspect="auto")  # aspect=100
+                for ax in [axis, axis2]:
+                    ax[i, j].set_title(group)
+                    ax[i, j].set_xlabel("distance")
+                    ax[i, j].set_ylabel(region_name)
+    sns.despine(fig, top=True, right=True, left=True, bottom=True)
+    sns.despine(fig2, top=True, right=True, left=True, bottom=True)
+    fig.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.heatmap.png"), bbox_inches="tight", dpi=300)
+    fig.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.heatmap.svg"), bbox_inches="tight")
+    fig2.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.heatmap.centered.png"), bbox_inches="tight", dpi=300)
+    fig2.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.heatmap.centered.svg"), bbox_inches="tight")
 
 
 def phasograms(self, samples, max_dist=10000, rolling_window=50, plotting_window=(0, 500)):
@@ -3896,12 +4033,27 @@ def main():
     # Investigate global changes in accessibility
     global_changes(atacseq_samples)
 
+    #
+
     # RNA-seq
     analysis.get_gene_expression(samples=rnaseq_samples)
     # Unsupervised analysis
     analysis.unsupervised_expression(rnaseq_samples, attributes=["knockout", "replicate", "clone"])
     # Supervised analysis
     analysis.differential_expression_analysis()
+
+    #
+
+    # See ATAC and RNA together
+    analysis.accessibility_expression()
+
+    #
+
+    # Deeper ATAC-seq data
+    nucleosome_changes(analysis, atacseq_samples)
+    investigate_nucleosome_positions(atacseq_samples)
+    phasograms(atacseq_samples)
+
 
 if __name__ == '__main__':
     try:
