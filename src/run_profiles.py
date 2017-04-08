@@ -104,6 +104,7 @@ parser.add_argument("--coverage-type", dest="coverage_type", required=True)
 parser.add_argument("--name", dest="name", required=True)
 parser.add_argument("--output-dir", dest="output_dir", required=True)
 parser.add_argument("--plot", dest="plot", default=False, action="store_true")
+parser.add_argument("--window-size", dest="window_size", default=1001, type=int)
 
 args = parser.parse_args()
 
@@ -120,7 +121,8 @@ else:
 
 coverage_matrix = coverage_function(
     args.bam_file,
-    [str(i.chrom) + ":" + str(i.start) + "-" + str(i.stop) for i in bedtool]
+    [str(i.chrom) + ":" + str(i.start) + "-" + str(i.stop) for i in bedtool],
+    n=args.window_size
 )
 coverage_matrix.to_csv(os.path.join(args.output_dir, "%s.%s.coverage_matrix.csv" % (args.name, args.coverage_type)))
 

@@ -3582,7 +3582,7 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
             for label, signal_file in signal_files:
                 print(group, region_name, label)
                 # run job
-                run_coverage_job(bed_file, signal_file, label, ".".join([group, region_name, label]), output_dir)
+                run_coverage_job(bed_file, signal_file, label, ".".join([group, region_name, label]), output_dir, window_size=2001)
                 # run vplot
                 if label == "signal":
                     run_vplot_job(bed_file, signal_file, ".".join([group, region_name, label]), output_dir)
@@ -3853,7 +3853,7 @@ def phasograms(self, samples, max_dist=10000, rolling_window=50, plotting_window
     fig.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "phasograms.nfr_lengths.peaks.svg"), bbox_inches="tight")
 
 
-def run_coverage_job(bed_file, bam_file, coverage_type, name, output_dir):
+def run_coverage_job(bed_file, bam_file, coverage_type, name, output_dir, window_size=1001):
     from pypiper import NGSTk
     tk = NGSTk()
     job_file = os.path.join(output_dir, "%s.run_enrichment.sh" % name)
@@ -3884,6 +3884,7 @@ python /home/arendeiro/jobs/run_profiles.py \
 --bed-file {} \
 --bam-file {} \
 --coverage-type {} \
+--window-size {} \
 --name {} \
 --output-dir {}
 
@@ -3894,6 +3895,7 @@ date
         bed_file,
         bam_file,
         coverage_type,
+        window_size,
         name,
         output_dir
     )
