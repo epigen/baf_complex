@@ -636,8 +636,106 @@ class Analysis(object):
         self.expression.to_csv(os.path.join(self.results_dir, self.name + ".expression_counts.gene_level.quantile_normalized.log2_tpm.csv"), index=True)
         self.expression_annotated.to_csv(os.path.join(self.results_dir, self.name + ".expression_counts.gene_level.quantile_normalized.log2_tpm.annotated_metadata.csv"), index=True)
 
-    def plot_peak_characteristics(self):
-        # Loop at summary statistics:
+    def plot_peak_characteristics(self, samples=None):
+        def get_sample_reads(bam_file):
+            return pysam.AlignmentFile(bam_file).count()
+
+        def get_peak_number(bed_file):
+            return len(open(bed_file, "r").read().split("\n"))
+
+        def get_total_open_chromatin(bed_file):
+            peaks = pd.read_csv(bed_file, sep="\t", header=None)
+            return (peaks.iloc[:, 2] - peaks.iloc[:, 1]).sum()
+
+        def get_peak_lengths(bed_file):
+            peaks = pd.read_csv(bed_file, sep="\t", header=None)
+            return (peaks.iloc[:, 2] - peaks.iloc[:, 1])
+
+        # Peaks per sample:
+        if samples is None:
+            samples = self.samples
+        stats = pd.DataFrame([
+            map(get_sample_reads, [s.filtered for s in samples]),
+            map(get_peak_number, [s.peaks for s in samples]),
+            map(get_total_open_chromatin, [s.peaks for s in samples])],
+            index=["reads_used", "peak_number", "open_chromatin"],
+            columns=[s.name for s in samples]).T
+
+        stats["peaks_norm"] = (stats["peak_number"] / stats["reads_used"]) * 1e3
+        stats["open_chromatin_norm"] = (stats["open_chromatin"] / stats["reads_used"])
+        stats.to_csv(os.path.join(self.results_dir, "{}.open_chromatin_space.csv".format(self.name)), index=True)
+        stats = pd.read_csv(os.path.join(self.results_dir, "{}.open_chromatin_space.csv".format(self.name)), index_col=0)
+
+        stats['knockout'] = stats.index.str.extract("HAP1_(.*?)_")
+        stats = stats.ix[stats.index[~stats.index.str.contains("GFP|HAP1_ATAC-seq_WT_Bulk_")]]
+        # median lengths per sample (split-apply-combine)
+        stats = pd.merge(stats, stats.groupby('knockout')['open_chromatin'].median().to_frame(name='group_open_chromatin').reset_index())
+        stats = pd.merge(stats, stats.groupby('knockout')['open_chromatin_norm'].median().to_frame(name='group_open_chromatin_norm').reset_index())
+
+        # plot
+        stats = stats.sort_values("open_chromatin_norm")
+        fig, axis = plt.subplots(2, 1, figsize=(4 * 2, 6 * 1))
+        sns.barplot(x="index", y="open_chromatin", data=stats.reset_index(), palette="summer", ax=axis[0])
+        sns.barplot(x="index", y="open_chromatin_norm", data=stats.reset_index(), palette="summer", ax=axis[1])
+        axis[0].set_ylabel("Total open chromatin space (bp)")
+        axis[1].set_ylabel("Total open chromatin space (normalized)")
+        axis[0].set_xticklabels(axis[0].get_xticklabels(), rotation=45, ha="right")
+        axis[1].set_xticklabels(axis[1].get_xticklabels(), rotation=45, ha="right")
+        sns.despine(fig)
+        fig.savefig(os.path.join(self.results_dir, "{}.total_open_chromatin_space.per_sample.svg".format(self.name)), bbox_inches="tight")
+
+        # per knockout group
+        fig, axis = plt.subplots(2, 1, figsize=(4 * 2, 6 * 1))
+        stats = stats.sort_values("group_open_chromatin")
+        sns.barplot(x="knockout", y="open_chromatin", data=stats.reset_index(), palette="summer", ax=axis[0])
+        sns.stripplot(x="knockout", y="open_chromatin", data=stats.reset_index(), palette="summer", ax=axis[0])
+        stats = stats.sort_values("group_open_chromatin_norm")
+        sns.barplot(x="knockout", y="open_chromatin_norm", data=stats.reset_index(), palette="summer", ax=axis[1])
+        sns.stripplot(x="knockout", y="open_chromatin_norm", data=stats.reset_index(), palette="summer", ax=axis[1])
+        axis[0].axhline(stats.groupby('knockout')['open_chromatin'].median()["WT"], color="black", linestyle="--")
+        axis[1].axhline(stats.groupby('knockout')['open_chromatin_norm'].median()["WT"], color="black", linestyle="--")
+        axis[0].set_ylabel("Total open chromatin space (bp)")
+        axis[1].set_ylabel("Total open chromatin space (normalized)")
+        axis[0].set_xticklabels(axis[0].get_xticklabels(), rotation=45, ha="right")
+        axis[1].set_xticklabels(axis[1].get_xticklabels(), rotation=45, ha="right")
+        sns.despine(fig)
+        fig.savefig(os.path.join(self.results_dir, "{}.total_open_chromatin_space.per_knockout.svg".format(self.name)), bbox_inches="tight")
+
+        # plot distribution of peak lengths
+        sample_peak_lengths = map(get_peak_lengths, [s.peaks for s in samples])
+        lengths = pd.melt(pd.DataFrame(sample_peak_lengths, index=[s.name for s in samples]).T, value_name='peak_length', var_name="sample_name").dropna()
+        lengths['knockout'] = lengths['sample_name'].str.extract("HAP1_(.*?)_")
+        lengths = lengths[~lengths['sample_name'].str.contains("GFP|HAP1_ATAC-seq_WT_Bulk_")]
+        # median lengths per sample (split-apply-combine)
+        lengths = pd.merge(lengths, lengths.groupby('sample_name')['peak_length'].median().to_frame(name='mean_peak_length').reset_index())
+        # median lengths per group (split-apply-combine)
+        lengths = pd.merge(lengths, lengths.groupby('knockout')['peak_length'].median().to_frame(name='group_mean_peak_length').reset_index())
+
+        lengths = lengths.sort_values("mean_peak_length")
+        fig, axis = plt.subplots(2, 1, figsize=(8 * 1, 4 * 2))
+        sns.boxplot(x="sample_name", y="peak_length", data=lengths, palette="summer", ax=axis[0], showfliers=False)
+        axis[0].set_ylabel("Peak length (bp)")
+        axis[0].set_xticklabels(axis[0].get_xticklabels(), visible=False)
+        sns.boxplot(x="sample_name", y="peak_length", data=lengths, palette="summer", ax=axis[1], showfliers=False)
+        axis[1].set_yscale("log")
+        axis[1].set_ylabel("Peak length (bp)")
+        axis[1].set_xticklabels(axis[1].get_xticklabels(), rotation=45, ha="right")
+        sns.despine(fig)
+        fig.savefig(os.path.join(self.results_dir, "{}.peak_lengths.per_sample.svg".format(self.name)), bbox_inches="tight")
+
+        lengths = lengths.sort_values("group_mean_peak_length")
+        fig, axis = plt.subplots(2, 1, figsize=(8 * 1, 4 * 2))
+        sns.boxplot(x="knockout", y="peak_length", data=lengths, palette="summer", ax=axis[0], showfliers=False)
+        axis[0].set_ylabel("Peak length (bp)")
+        axis[0].set_xticklabels(axis[0].get_xticklabels(), visible=False)
+        sns.boxplot(x="knockout", y="peak_length", data=lengths, palette="summer", ax=axis[1], showfliers=False)
+        axis[1].set_yscale("log")
+        axis[1].set_ylabel("Peak length (bp)")
+        axis[1].set_xticklabels(axis[1].get_xticklabels(), rotation=45, ha="right")
+        sns.despine(fig)
+        fig.savefig(os.path.join(self.results_dir, "{}.peak_lengths.per_knockout.svg".format(self.name)), bbox_inches="tight")
+
+        # Peak set across samples:
         # interval lengths
         fig, axis = plt.subplots()
         sns.distplot([interval.length for interval in self.sites], bins=300, kde=False, ax=axis)
@@ -645,7 +743,7 @@ class Analysis(object):
         axis.set_xlabel("peak width (bp)")
         axis.set_ylabel("frequency")
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.lengths.svg"), bbox_inches="tight")
+        fig.savefig(os.path.join(self.results_dir, "{}.lengths.svg".format(self.name)), bbox_inches="tight")
         plt.close("all")
 
         # plot support
@@ -653,7 +751,7 @@ class Analysis(object):
         sns.distplot(self.support["support"], bins=40, ax=axis)
         axis.set_ylabel("frequency")
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.support.svg"), bbox_inches="tight")
+        fig.savefig(os.path.join(self.results_dir, "{}.support.svg".format(self.name)), bbox_inches="tight")
         plt.close("all")
 
         # Plot distance to nearest TSS
@@ -663,7 +761,7 @@ class Analysis(object):
         axis.set_xlabel("distance to nearest TSS (bp)")
         axis.set_ylabel("frequency")
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.tss_distance.svg"), bbox_inches="tight")
+        fig.savefig(os.path.join(self.results_dir, "{}.tss_distance.svg".format(self.name)), bbox_inches="tight")
         plt.close("all")
 
         # Plot genomic regions
@@ -696,8 +794,7 @@ class Analysis(object):
         fig.autofmt_xdate()
         fig.tight_layout()
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.genomic_regions.svg"), bbox_inches="tight")
-        plt.close("all")
+        fig.savefig(os.path.join(self.results_dir, "{}.genomic_regions.svg".format(self.name)), bbox_inches="tight")
 
         # # Plot chromatin states
         # get long list of chromatin states (for plotting)
@@ -728,7 +825,7 @@ class Analysis(object):
         fig.autofmt_xdate()
         fig.tight_layout()
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.chromatin_states.svg"), bbox_inches="tight")
+        fig.savefig(os.path.join(self.results_dir, "{}.chromatin_states.svg".format(self.name)), bbox_inches="tight")
 
         # distribution of count attributes
         data = self.coverage_annotated.copy()
@@ -736,26 +833,24 @@ class Analysis(object):
         fig, axis = plt.subplots(1)
         sns.distplot(data["mean"], rug=False, ax=axis)
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.mean.distplot.svg"), bbox_inches="tight")
+        fig.savefig(os.path.join(self.results_dir, "{}.mean.distplot.svg".format(self.name)), bbox_inches="tight")
 
         fig, axis = plt.subplots(1)
         sns.distplot(data["qv2"], rug=False, ax=axis)
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.qv2.distplot.svg"), bbox_inches="tight")
+        fig.savefig(os.path.join(self.results_dir, "{}.qv2.distplot.svg".format(self.name)), bbox_inches="tight")
 
         fig, axis = plt.subplots(1)
         sns.distplot(data["dispersion"], rug=False, ax=axis)
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.dispersion.distplot.svg"), bbox_inches="tight")
+        fig.savefig(os.path.join(self.results_dir, "{}.dispersion.distplot.svg".format(self.name)), bbox_inches="tight")
 
         # this is loaded now
         df = pd.read_csv(os.path.join(self.data_dir, self.name + "_peaks.support.csv"))
         fig, axis = plt.subplots(1)
         sns.distplot(df["support"], rug=False, ax=axis)
         sns.despine(fig)
-        fig.savefig(os.path.join(self.results_dir, "baf-kubicek.support.distplot.svg"), bbox_inches="tight")
-
-        plt.close("all")
+        fig.savefig(os.path.join(self.results_dir, "{}.support.distplot.svg".format(self.name)), bbox_inches="tight")
 
     def plot_coverage(self):
         data = self.coverage_annotated.copy()
@@ -841,7 +936,6 @@ class Analysis(object):
         g = sns.FacetGrid(data_melted, col="chromatin_state", col_wrap=3)
         g.map(sns.distplot, "support", hist=False, rug=False)
         g.fig.savefig(os.path.join(self.results_dir, "norm_counts.support.chromatin_state.distplot.png"), bbox_inches="tight", dpi=300)
-        plt.close("all")
 
     def plot_variance(self, samples):
 
@@ -1580,6 +1674,7 @@ class Analysis(object):
         diff["direction"] = diff["log2FoldChange"].apply(lambda x: "up" if x >= 0 else "down")
 
         split_diff = diff.groupby(["comparison", "direction"])['stat'].count().sort_values(ascending=False)
+
         fig, axis = plt.subplots(1, figsize=(12, 8))
         sns.barplot(
             split_diff.values,
@@ -1600,6 +1695,34 @@ class Analysis(object):
         sns.despine(fig)
         fig.savefig(os.path.join(output_dir, "%s.%s.number_differential.split_percentage.svg" % (output_suffix, trait)), bbox_inches="tight")
 
+        # in same
+        split_diff = diff.groupby(["comparison", "direction"])['stat'].count().sort_values(ascending=False)
+
+        split_diff = split_diff.reset_index()
+        split_diff.loc[split_diff['direction'] == "down", "stat"] = -split_diff.loc[split_diff['direction'] == "down", "stat"]
+        fig, axis = plt.subplots(1, figsize=(6, 3))
+        sns.barplot(
+            x="comparison", y="stat", data=split_diff, hue="direction",  # split=False,
+            order=split_diff.groupby(['comparison'])['stat'].apply(lambda x: sum(abs(x))).sort_values(ascending=False).index,
+            orient="v", ax=axis)
+        axis.axhline(0, color="black", linestyle="--")
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=45, ha="right")
+        sns.despine(fig)
+        fig.savefig(os.path.join(output_dir, "%s.%s.number_differential.split.pos_neg.svg" % (output_suffix, trait)), bbox_inches="tight")
+
+        # percentage of total
+        split_diff['stat'] = (split_diff['stat'].values / total_sites) * 100
+        fig, axis = plt.subplots(1, figsize=(6, 3))
+        sns.barplot(
+            x="comparison", y="stat", data=split_diff, hue="direction",  # split=False,
+            order=split_diff.groupby(['comparison'])['stat'].apply(lambda x: sum(abs(x))).sort_values(ascending=False).index,
+            orient="v", ax=axis)
+        axis.axhline(0, color="black", linestyle="--")
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=45, ha="right")
+        sns.despine(fig)
+        fig.savefig(os.path.join(output_dir, "%s.%s.number_differential.split_percentage.pos_neg.svg" % (output_suffix, trait)), bbox_inches="tight")
+
+        # Overlap between sets
         # # Pyupset
         # import pyupset as pyu
         # # Build dict
@@ -1609,6 +1732,8 @@ class Analysis(object):
         # plot = pyu.plot(df_dict, unique_keys=['index'], inters_size_bounds=(10, np.inf))
         # plot['figure'].set_size_inches(20, 8)
         # plot['figure'].savefig(os.path.join(output_dir, "%s.%s.number_differential.upset.svg" % (output_suffix, trait)), bbox_inched="tight")
+
+
 
         # Pairwise scatter plots
         cond2 = "WT"
