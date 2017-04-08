@@ -2103,7 +2103,7 @@ class Analysis(object):
                 # region's function
                 if not os.path.exists(os.path.join(comparison_dir, prefix + "_regions.enrichr.csv")):
                     print(prefix)
-                    # characterize_regions_function(df=comparison_df, prefix=prefix, output_dir=comparison_dir)
+                    characterize_regions_function(df=comparison_df, prefix=prefix, output_dir=comparison_dir)
 
                 # Read/parse enrichment outputs and add to DFs
                 enr = pd.read_csv(os.path.join(comparison_dir, prefix + "_regions.region_enrichment.csv"))
@@ -3185,6 +3185,23 @@ def meme_ame(input_fasta, output_dir, background_fasta=None):
     # done
 
 
+def homer_motifs(bed_file, output_dir, genome="hg19"):
+    cmd = "findMotifsGenome.pl {bed} {genome}r {out_dir}  -size 1000 -h -p 2 -len 8,10,12,14 -noknown".format(
+        bed=bed_file, genome=genome, out_dir=output_dir
+    )
+    os.system(cmd)
+
+    # # for missing
+    # for F in `find . -iname *regions.bed`
+    # do
+    #     if  [ ! -f `dirname $F`/homerResults ]; then
+    #         echo $F
+    #         DIRNAME=`dirname $F`
+    #         sbatch -J HOMER_MOTIF_${F} -o ${F/bed/homer_motif.log} ~/run_homer_motifs.sh ${F} hg19 ${DIRNAME}
+    #     fi
+    # done
+
+
 def parse_ame(ame_dir):
 
     with open(os.path.join(ame_dir, "ame.txt"), 'r') as handle:
@@ -3250,6 +3267,9 @@ def characterize_regions_structure(df, prefix, output_dir, universe_df=None):
 
 
 def characterize_regions_function(df, output_dir, prefix, results_dir="results", universe_file=None):
+    def scale_score(x):
+        return (x - x.min()) / (x.max() - x.min())
+
     # use all sites as universe
     if universe_file is None:
         universe_file = os.path.join(analysis.results_dir, analysis.name + "_peak_set.bed")
@@ -3268,12 +3288,36 @@ def characterize_regions_function(df, output_dir, prefix, results_dir="results",
     # export ensembl gene names
     df['gene_name'].str.split(",").apply(pd.Series, 1).stack().drop_duplicates().to_csv(os.path.join(output_dir, "%s_genes.symbols.txt" % prefix), index=False)
 
+    # export gene symbols with scaled absolute fold change
+    if "log2FoldChange" in df.columns:
+        df["score"] = scale_score(abs(df["log2FoldChange"]))
+        df["abs_fc"] = abs(df["log2FoldChange"])
+
+        d = df[['gene_name', 'score']].sort_values('score', ascending=False)
+
+        # split gene names from score if a reg.element was assigned to more than one gene
+        a = (
+            d['gene_name']
+            .str.split(",")
+            .apply(pd.Series, 1)
+            .stack()
+        )
+        a.index = a.index.droplevel(1)
+        a.name = 'gene_name'
+        d = d[['score']].join(a)
+        # reduce various ranks to mean per gene
+        d = d.groupby('gene_name').mean().reset_index()
+        d.to_csv(os.path.join(output_dir, "%s_genes.symbols.score.csv" % prefix), index=False)
+
     # Motifs
-    # de novo motif finding - enrichment
     fasta_file = os.path.join(output_dir, "%s_regions.fa" % prefix)
     bed_to_fasta(bed_file, fasta_file)
 
+    # motif enrichment
     meme_ame(fasta_file, output_dir)
+
+    # de novo motif finding
+    homer_motifs(bed_file, output_dir, genome="hg19")
 
     # Lola
     try:
