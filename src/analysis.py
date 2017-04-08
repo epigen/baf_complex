@@ -1732,8 +1732,72 @@ class Analysis(object):
         # plot = pyu.plot(df_dict, unique_keys=['index'], inters_size_bounds=(10, np.inf))
         # plot['figure'].set_size_inches(20, 8)
         # plot['figure'].savefig(os.path.join(output_dir, "%s.%s.number_differential.upset.svg" % (output_suffix, trait)), bbox_inched="tight")
+        piv = pd.pivot_table(diff.reset_index(), index='index', columns=['comparison', 'direction'], values='intersect', fill_value=0)
 
+        import itertools
+        intersections = pd.DataFrame(columns=["group1", "group2", "dir1", "dir2", "size1", "size2", "intersection", "union"])
+        for ((k1, dir1), i1), ((k2, dir2), i2) in itertools.permutations(piv.T.groupby(level=['comparison', 'direction']).groups.items(), 2):
+            print(k1, k2)
+            i1 = set(piv[i1][piv[i1] == 1].dropna().index)
+            i2 = set(piv[i2][piv[i2] == 1].dropna().index)
+            intersections = intersections.append(
+                pd.Series(
+                    [k1, k2, dir1, dir2, len(i1), len(i2), len(i1.intersection(i2)), len(i1.union(i2))],
+                    index=["group1", "group2", "dir1", "dir2", "size1", "size2", "intersection", "union"]
+                ),
+                ignore_index=True
+            )
+        # convert to %
+        intersections['intersection_perc'] = (intersections['intersection'] / intersections['size2']) * 100.
 
+        # make pivot tables
+        piv_up = pd.pivot_table(intersections[(intersections['dir1'] == "up") & (intersections['dir2'] == "up")], index="group1", columns="group2", values="intersection_perc").fillna(0)
+        piv_down = pd.pivot_table(intersections[(intersections['dir1'] == "down") & (intersections['dir2'] == "down")], index="group1", columns="group2", values="intersection_perc").fillna(0)
+        np.fill_diagonal(piv_up.values, np.nan)
+        np.fill_diagonal(piv_down.values, np.nan)
+
+        # heatmaps
+        fig, axis = plt.subplots(1, 2, figsize=(8 * 2, 8))
+        sns.heatmap(piv_down, square=True, cmap="summer", cbar_kws={"label": "Concordant regions (% of group 2)"}, ax=axis[0])
+        sns.heatmap(piv_up, square=True, cmap="summer", cbar_kws={"label": "Concordant regions (% of group 2)"}, ax=axis[1])
+        axis[0].set_title("Downregulated regions")
+        axis[1].set_title("Upregulated regions")
+        axis[0].set_xticklabels(axis[0].get_xticklabels(), rotation=90, ha="right")
+        axis[1].set_xticklabels(axis[1].get_xticklabels(), rotation=90, ha="right")
+        axis[0].set_yticklabels(axis[0].get_yticklabels(), rotation=0, ha="right")
+        axis[1].set_yticklabels(axis[1].get_yticklabels(), rotation=0, ha="right")
+        fig.savefig(os.path.join(output_dir, "%s.%s.number_differential.overlap.up_down_split.svg" % (output_suffix, trait)), bbox_inches="tight")
+
+        # combined heatmap
+        # with upregulated regions in upper square matrix and downredulated in down square
+        piv_combined = pd.DataFrame(np.triu(piv_up), index=piv_up.index, columns=piv_up.columns).replace(0, np.nan)
+        piv_combined.update(pd.DataFrame(np.tril(piv_down), index=piv_down.index, columns=piv_down.columns).replace(0, np.nan))
+        piv_combined = piv_combined.fillna(0)
+        np.fill_diagonal(piv_combined.values, np.nan)
+
+        fig, axis = plt.subplots(1, figsize=(8, 8))
+        sns.heatmap(piv_combined, square=True, cmap="summer", cbar_kws={"label": "Concordant regions (% of group 2)"}, ax=axis)
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=90, ha="right")
+        axis.set_yticklabels(axis.get_yticklabels(), rotation=0, ha="right")
+        fig.savefig(os.path.join(output_dir, "%s.%s.number_differential.overlap.up_down_together.svg" % (output_suffix, trait)), bbox_inches="tight")
+
+        # Observe disagreement between knockouts
+        # (overlap of down-regulated with up-regulated and vice-versa)
+        # piv_disagree = pd.pivot_table(intersections[intersections['dir1'] != intersections['dir2']], index="group1", columns="group2", values="intersection_perc")
+
+        piv_up = pd.pivot_table(intersections[(intersections['dir1'] == "up") & (intersections['dir2'] == "down")], index="group1", columns="group2", values="intersection")
+        piv_down = pd.pivot_table(intersections[(intersections['dir1'] == "down") & (intersections['dir2'] == "up")], index="group1", columns="group2", values="intersection")
+
+        piv_disagree = pd.DataFrame(np.triu(piv_up), index=piv_up.index, columns=piv_up.columns).replace(0, np.nan)
+        piv_disagree.update(pd.DataFrame(np.tril(piv_down), index=piv_down.index, columns=piv_down.columns).replace(0, np.nan))
+        piv_disagree = piv_disagree.fillna(0)
+        np.fill_diagonal(piv_disagree.values, np.nan)
+
+        fig, axis = plt.subplots(1, figsize=(8, 8))
+        sns.heatmap(np.log10(1 + piv_disagree), square=True, cmap="summer", cbar_kws={"label": "Discordant regions (log10)"}, ax=axis)
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=90, ha="right")
+        axis.set_yticklabels(axis.get_yticklabels(), rotation=0, ha="right")
+        fig.savefig(os.path.join(output_dir, "%s.%s.number_differential.overlap.disagreement.svg" % (output_suffix, trait)), bbox_inches="tight")
 
         # Pairwise scatter plots
         cond2 = "WT"
