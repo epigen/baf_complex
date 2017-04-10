@@ -651,6 +651,10 @@ class Analysis(object):
             peaks = pd.read_csv(bed_file, sep="\t", header=None)
             return (peaks.iloc[:, 2] - peaks.iloc[:, 1])
 
+        def get_peak_chroms(bed_file):
+            peaks = pd.read_csv(bed_file, sep="\t", header=None)
+            return peaks.iloc[:, 0].value_counts()
+
         # Peaks per sample:
         if samples is None:
             samples = self.samples
@@ -734,6 +738,17 @@ class Analysis(object):
         axis[1].set_xticklabels(axis[1].get_xticklabels(), rotation=45, ha="right")
         sns.despine(fig)
         fig.savefig(os.path.join(self.results_dir, "{}.peak_lengths.per_knockout.svg".format(self.name)), bbox_inches="tight")
+
+        # peaks per chromosome per sample
+        chroms = pd.DataFrame(map(get_peak_chroms, [s.peaks for s in samples]), index=[s.name for s in samples]).fillna(0).T
+        chroms_norm = (chroms / chroms.sum(axis=0)) * 100
+        chroms_norm = chroms_norm.ix[["chr{}".format(i) for i in range(1, 23) + ['X', 'Y', 'M']]]
+
+        fig, axis = plt.subplots(1, 1, figsize=(8 * 1, 8 * 1))
+        sns.heatmap(chroms_norm, square=True, cmap="summer", ax=axis)
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=90, ha="right")
+        axis.set_yticklabels(axis.get_yticklabels(), rotation=0, ha="right")
+        fig.savefig(os.path.join(self.results_dir, "{}.peak_location.per_sample.svg".format(self.name)), bbox_inches="tight")
 
         # Peak set across samples:
         # interval lengths
@@ -1798,6 +1813,20 @@ class Analysis(object):
         axis.set_xticklabels(axis.get_xticklabels(), rotation=90, ha="right")
         axis.set_yticklabels(axis.get_yticklabels(), rotation=0, ha="right")
         fig.savefig(os.path.join(output_dir, "%s.%s.number_differential.overlap.disagreement.svg" % (output_suffix, trait)), bbox_inches="tight")
+
+        # Changes per chromosome per group
+        diff['chrom'] = [x[0] for x in diff.index.str.split(":")]
+        chroms = diff.groupby(["comparison"])['chrom'].value_counts()
+        chroms.name = "count"
+        pivot_chroms = pd.pivot_table(chroms.reset_index(), index="chrom", columns='comparison', values="count", fill_value=0)
+        chroms_norm = (pivot_chroms / pivot_chroms.sum(axis=0)) * 100
+        chroms_norm = chroms_norm.ix[["chr{}".format(i) for i in range(1, 23) + ['X']]]
+
+        fig, axis = plt.subplots(1, 1, figsize=(8 * 1, 8 * 1))
+        sns.heatmap(chroms_norm, square=True, cmap="summer", ax=axis)
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=90, ha="right")
+        axis.set_yticklabels(axis.get_yticklabels(), rotation=0, ha="right")
+        fig.savefig(os.path.join(self.results_dir, "%s.%s.number_differential.chrom_location.svg" % (output_suffix, trait)), bbox_inches="tight")
 
         # Pairwise scatter plots
         cond2 = "WT"
