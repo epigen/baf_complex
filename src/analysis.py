@@ -3252,6 +3252,29 @@ def parse_ame(ame_dir):
     return pd.Series(dict(output))
 
 
+def parse_homer(homer_html):
+    import re
+
+    with open(homer_html, 'r') as handle:
+        content = handle.read().strip()
+
+    content2 = re.sub("(\d)\n", "\g<1>", content)
+    rows = [x for x in content2.split("\n") if x[:4] == "<TR>"]
+
+    additional_header = ["STD(Bg STD)", "Best Match/Details", "Motif File"]
+    df = pd.DataFrame(
+        [re.sub("</TD>", "", re.sub("</TR>", "", re.sub("<TR>", "", x))).split("<TD>") for x in rows[1:]],
+        columns=re.sub("</TD>", "", re.sub("</TR>", "", re.sub("<TR>", "", rows[0]))).split("<TD>") + additional_header)
+    df = pd.concat([df, df["Best Match/Details"].str.extract("^(?P<motif_name>.*)\((?P<motif_match_score>.*)\)<BR/")], axis=1)
+    df["-log_p_value"] = -df["log P-pvalue"].astype(float)
+    df["% of Targets"] = df["% of Targets"].str.extract("(.*)%").astype(float)
+    df["% of Background"] = df["% of Background"].str.extract("(.*)%").astype(float)
+    df["fold_enrichment_over_background"] = df["% of Targets"] / df["% of Background"]
+    df["log2_fold_enrichment_over_background"] = np.log2(df["fold_enrichment_over_background"])
+
+    return df
+
+
 def characterize_regions_structure(df, prefix, output_dir, universe_df=None):
     # use all sites as universe
     if universe_df is None:
