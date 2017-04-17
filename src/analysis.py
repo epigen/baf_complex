@@ -1116,7 +1116,7 @@ class Analysis(object):
         from scipy.stats import pearsonr
 
         color_dataframe = pd.DataFrame(
-            self.get_level_colors(index=self.accessibility[[s.name for s in samples]].columns, levels=attributes),
+            self.get_level_colors(index=self.accessibility[[s.name for s in samples]].columns, levels=attributes, pallete="Vega20b"),
             index=attributes, columns=[s.name for s in samples])
 
         # exclude samples if needed
@@ -1151,18 +1151,18 @@ class Analysis(object):
         mds = MDS(n_jobs=-1)
         x_new = mds.fit_transform(X.T)
         # transform again
-        x = pd.DataFrame(x_new)
+        x = pd.DataFrame(x_new, index=X.columns, columns=range(x_new.shape[1]))
         xx = x.apply(lambda j: (j - j.mean()) / j.std(), axis=0)
 
         fig, axis = plt.subplots(1, len(to_plot), figsize=(4 * len(to_plot), 4 * 1))
         axis = axis.flatten()
         for i, attr in enumerate(to_plot):
-            for j in range(len(xx)):
+            for j, sample in enumerate(xx.index):
                 try:
                     label = getattr(samples[j], to_plot[i])
                 except AttributeError:
                     label = np.nan
-                axis[i].scatter(xx.ix[j][0], xx.ix[j][1], s=50, color=color_dataframe.ix[attr][j], label=label)
+                axis[i].scatter(xx.loc[sample, 0], xx.loc[sample, 1], s=50, color=color_dataframe.iloc[i, j], label=label)
             axis[i].set_title(to_plot[i])
             axis[i].set_xlabel("MDS 1")
             axis[i].set_ylabel("MDS 2")
@@ -1173,15 +1173,25 @@ class Analysis(object):
             handles, labels = axis[i].get_legend_handles_labels()
             by_label = OrderedDict(zip(labels, handles))
             if any([type(c) in [str, unicode] for c in by_label.keys()]) and len(by_label) <= 30:
-                if not any([re.match("^\d", c) for c in by_label.keys()]):
-                    axis[i].legend(by_label.values(), by_label.keys())
+                # if not any([re.match("^\d", c) for c in by_label.keys()]):
+                axis[i].legend(by_label.values(), by_label.keys())
+
+        # Add group text labels to middle
+        for i, attr in enumerate(to_plot):
+            group_xx = xx.groupby(level=[attr]).mean()
+            # average colour across samples of same group
+            color_dataframe.columns = xx.index
+            group_color_dataframe = color_dataframe.T.groupby(level=[attr])[attr].apply(lambda x: np.array(list(x)).mean(0))
+            for j, group in enumerate(group_xx.index):
+                axis[i].text(group_xx.loc[group, 0], group_xx.loc[group, 1], s=group, color=group_color_dataframe.ix[j], ha="center")
+
         fig.savefig(os.path.join(self.results_dir, "{}.all_sites.mds.svg".format(self.name)), bbox_inches="tight")
 
         # PCA
         pca = PCA()
         x_new = pca.fit_transform(X.T)
         # transform again
-        x = pd.DataFrame(x_new)
+        x = pd.DataFrame(x_new, index=X.columns, columns=range(x_new.shape[1]))
         xx = x.apply(lambda j: (j - j.mean()) / j.std(), axis=0)
 
         # plot % explained variance per PC
@@ -1196,16 +1206,16 @@ class Analysis(object):
         fig.savefig(os.path.join(self.results_dir, "{}.all_sites.pca.explained_variance.svg".format(self.name)), bbox_inches='tight')
 
         # plot
-        pcs = min(xx.shape[0] - 1, 10)
+        pcs = min(xx.shape[0] - 1, 4)
         fig, axis = plt.subplots(pcs, len(to_plot), figsize=(4 * len(to_plot), 4 * pcs))
         for pc in range(pcs):
             for i, attr in enumerate(to_plot):
-                for j in range(len(xx)):
+                for j, sample in enumerate(xx.index):
                     try:
                         label = getattr(samples[j], to_plot[i])
                     except AttributeError:
                         label = np.nan
-                    axis[pc, i].scatter(xx.ix[j][pc], xx.ix[j][pc + 1], s=50, color=color_dataframe.ix[attr][j], label=label)
+                    axis[pc, i].scatter(xx.loc[sample, pc], xx.loc[sample, pc + 1], s=50, color=color_dataframe.iloc[i, j], label=label)
                 axis[pc, i].set_title(to_plot[i])
                 axis[pc, i].set_xlabel("PC {}".format(pc + 1))
                 axis[pc, i].set_ylabel("PC {}".format(pc + 2))
@@ -1216,8 +1226,19 @@ class Analysis(object):
                 handles, labels = axis[pc, i].get_legend_handles_labels()
                 by_label = OrderedDict(zip(labels, handles))
                 if any([type(c) in [str, unicode] for c in by_label.keys()]) and len(by_label) <= 30:
-                    if not any([re.match("^\d", c) for c in by_label.keys()]):
-                        axis[pc, i].legend(by_label.values(), by_label.keys())
+                    # if not any([re.match("^\d", c) for c in by_label.keys()]):
+                    axis[pc, i].legend(by_label.values(), by_label.keys())
+
+        # Add group text labels to middle
+        for pc in range(pcs):
+            for i, attr in enumerate(to_plot):
+                group_xx = xx.groupby(level=[attr]).mean()
+                # average colour across samples of same group
+                color_dataframe.columns = xx.index
+                group_color_dataframe = color_dataframe.T.groupby(level=[attr])[attr].apply(lambda x: np.array(list(x)).mean(0))
+                for j, group in enumerate(group_xx.index):
+                    axis[pc, i].text(group_xx.loc[group, pc], group_xx.loc[group, pc + 1], s=group, color=group_color_dataframe.ix[group], ha="center")
+
         fig.savefig(os.path.join(self.results_dir, "{}.all_sites.pca.svg".format(self.name)), bbox_inches="tight")
 
         #
