@@ -1745,6 +1745,8 @@ class Analysis(object):
         df.to_csv(os.path.join(output_dir, output_suffix) + ".%s.annotated.csv" % trait)
         df = pd.read_csv(os.path.join(output_dir, output_suffix) + ".%s.annotated.csv" % trait, index_col=0)
         df['comparison'] = df['comparison'].str.replace("-WT", "")
+        df = df[~df['comparison'].str.contains("-")]
+        df = df[~df['comparison'].str.contains("SMARCC2|GFP")]
 
         # Extract significant based on p-value and fold-change
         diff = df[(df["padj"] < 0.01) & (abs(df["log2FoldChange"]) > 1.)]
@@ -1842,6 +1844,7 @@ class Analysis(object):
         # plot['figure'].set_size_inches(20, 8)
         # plot['figure'].savefig(os.path.join(output_dir, "%s.%s.number_differential.upset.svg" % (output_suffix, trait)), bbox_inched="tight")
         diff["intersect"] = 1
+        diff["direction"] = diff["log2FoldChange"].apply(lambda x: "up" if x >= 0 else "down")
         piv = pd.pivot_table(diff.reset_index(), index='index', columns=['comparison', 'direction'], values='intersect', fill_value=0)
 
         import itertools
@@ -1893,20 +1896,30 @@ class Analysis(object):
 
         # Observe disagreement between knockouts
         # (overlap of down-regulated with up-regulated and vice-versa)
-        # piv_disagree = pd.pivot_table(intersections[intersections['dir1'] != intersections['dir2']], index="group1", columns="group2", values="intersection_perc")
-
         piv_up = pd.pivot_table(intersections[(intersections['dir1'] == "up") & (intersections['dir2'] == "down")], index="group1", columns="group2", values="intersection")
         piv_down = pd.pivot_table(intersections[(intersections['dir1'] == "down") & (intersections['dir2'] == "up")], index="group1", columns="group2", values="intersection")
 
-        piv_disagree = pd.DataFrame(np.triu(piv_up), index=piv_up.index, columns=piv_up.columns).replace(0, np.nan)
-        piv_disagree.update(pd.DataFrame(np.tril(piv_down), index=piv_down.index, columns=piv_down.columns).replace(0, np.nan))
-        piv_disagree = piv_disagree.fillna(0)
-        np.fill_diagonal(piv_disagree.values, np.nan)
+        piv_disagree = pd.concat([piv_up, piv_down]).groupby(level=0).max()
 
-        fig, axis = plt.subplots(1, figsize=(8, 8))
-        sns.heatmap(np.log10(1 + piv_disagree), square=True, cmap="summer", cbar_kws={"label": "Discordant regions (log10)"}, ax=axis)
-        axis.set_xticklabels(axis.get_xticklabels(), rotation=90, ha="right")
-        axis.set_yticklabels(axis.get_yticklabels(), rotation=0, ha="right")
+        fig, axis = plt.subplots(1, 2, figsize=(16, 8))
+        sns.heatmap(piv_disagree, square=True, cmap="Greens", cbar_kws={"label": "Discordant regions"}, ax=axis[0])
+        sns.heatmap(np.log2(1 + piv_disagree), square=True, cmap="Greens", cbar_kws={"label": "Discordant regions (log2)"}, ax=axis[1])
+
+        norm = matplotlib.colors.Normalize(vmin=0, vmax=piv_disagree.max().max())
+        cmap = plt.get_cmap("Greens")
+        log_norm = matplotlib.colors.Normalize(vmin=0, vmax=np.log2(1 + piv_disagree).max().max())
+        for i, g1 in enumerate(piv_disagree.columns):
+            for j, g2 in enumerate(piv_disagree.index):
+                axis[0].scatter(
+                    len(piv_disagree.index) - (j + 0.5), len(piv_disagree.index) - (i + 0.5),
+                    s=(100 ** (norm(piv_disagree.loc[g1, g2]))) - 1, color=cmap(norm(piv_disagree.loc[g1, g2])), marker="o")
+                axis[1].scatter(
+                    len(piv_disagree.index) - (j + 0.5), len(piv_disagree.index) - (i + 0.5),
+                    s=(100 ** (log_norm(np.log2(1 + piv_disagree).loc[g1, g2]))) - 1, color=cmap(log_norm(np.log2(1 + piv_disagree).loc[g1, g2])), marker="o")
+
+        for ax in axis:
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=90, ha="right")
+            ax.set_yticklabels(ax.get_yticklabels(), rotation=0, ha="right")
         fig.savefig(os.path.join(output_dir, "%s.%s.number_differential.overlap.disagreement.svg" % (output_suffix, trait)), bbox_inches="tight")
 
         # Changes per chromosome per group
@@ -1948,13 +1961,13 @@ class Analysis(object):
                 cond1, cond2 = cond1.split("-")
 
             # Hexbin plot
-            axis.hexbin(np.log2(1 + df2[cond1]), np.log2(1 + df2[cond2]), alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1)
+            axis.hexbin(np.log2(1 + df2[cond1]), np.log2(1 + df2[cond2]), alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1, rasterized=True)
             axis.set_xlabel(cond1)
 
             diff2 = diff[diff["comparison"] == comparison]
             if diff2.shape[0] > 0:
                 # Scatter plot
-                axis.scatter(np.log2(1 + diff2[cond1]), np.log2(1 + diff2[cond2]), alpha=0.1, color="red", s=2)
+                axis.scatter(np.log2(1 + diff2[cond1]), np.log2(1 + diff2[cond2]), alpha=0.1, color="red", s=2, rasterized=True)
             m = max(np.log2(1 + df2[cond1]).max(), np.log2(1 + df2[cond2]).max())
             axis.plot([0, m], [0, m], color="black", alpha=0.8, linestyle="--")
             axis.set_ylabel(cond1)
@@ -1985,12 +1998,12 @@ class Analysis(object):
             else:
                 cond1, cond2 = cond1.split("-")
             # hexbin
-            axis.hexbin(df2["log2FoldChange"], -np.log10(df2['pvalue']), alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1)
+            axis.hexbin(df2["log2FoldChange"], -np.log10(df2['pvalue']), alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1, rasterized=True)
 
             diff2 = diff[diff["comparison"] == comparison]
             if diff2.shape[0] > 0:
                 # significant scatter
-                axis.scatter(diff2["log2FoldChange"], -np.log10(diff2['pvalue']), alpha=0.2, color="red", s=2)
+                axis.scatter(diff2["log2FoldChange"], -np.log10(diff2['pvalue']), alpha=0.2, color="red", s=2, rasterized=True)
             axis.axvline(0, linestyle="--", color="black", alpha=0.8)
             axis.set_title(comparison)
             axis.set_xlabel("log2(fold change)")
@@ -2021,12 +2034,12 @@ class Analysis(object):
             else:
                 cond1, cond2 = cond1.split("-")
             # hexbin
-            axis.hexbin(np.log2(df2["baseMean"]), df2["log2FoldChange"], alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1)
+            axis.hexbin(np.log2(df2["baseMean"]), df2["log2FoldChange"], alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1, rasterized=True)
 
             diff2 = diff[diff["comparison"] == comparison]
             if diff2.shape[0] > 0:
                 # significant scatter
-                axis.scatter(np.log2(diff2["baseMean"]), diff2["log2FoldChange"], alpha=0.2, color="red", s=2)
+                axis.scatter(np.log2(diff2["baseMean"]), diff2["log2FoldChange"], alpha=0.2, color="red", s=2, rasterized=True)
             axis.axhline(0, linestyle="--", color="black", alpha=0.8)
             axis.set_title(comparison)
             axis.set_xlabel("Intensity")
@@ -2061,10 +2074,10 @@ class Analysis(object):
             d = pd.DataFrame([dots, colors], index=["region", "color"]).T.sample(frac=1)
             df1 = df[df["comparison"] == cond1].ix[d['region']]
             df2 = df[df["comparison"] == cond2].ix[d['region']]
-            axis.scatter(np.log2(1 + df1[cond1]), np.log2(1 + df2[cond2]), alpha=0.5, color=d['color'], s=5)
+            axis.scatter(np.log2(1 + df1[cond1]), np.log2(1 + df2[cond2]), alpha=0.5, color=d['color'], s=5, rasterized=True)
             df1 = df[df["comparison"] == cond1].ix[inter]
             df2 = df[df["comparison"] == cond2].ix[inter]
-            axis.scatter(np.log2(1 + df1[cond1]), np.log2(1 + df2[cond2]), alpha=0.85, color="orange", s=15)
+            axis.scatter(np.log2(1 + df1[cond1]), np.log2(1 + df2[cond2]), alpha=0.85, color="orange", s=15, rasterized=True)
             axis.set_xlabel(cond1)
             axis.set_ylabel(cond2)
 
@@ -2073,7 +2086,6 @@ class Analysis(object):
             axis.plot([0, m], [0, m], color="black", alpha=0.8, linestyle="--")
         sns.despine(fig)
         fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
-        fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         # with fold-change values
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 4, n_rows * 4), sharex=True, sharey=True)
@@ -2097,10 +2109,10 @@ class Analysis(object):
             d = pd.DataFrame([dots, colors], index=["region", "color"]).T.sample(frac=1)
             df1 = df[df["comparison"] == cond1].ix[d['region']]
             df2 = df[df["comparison"] == cond2].ix[d['region']]
-            axis.scatter(df1["log2FoldChange"], df2["log2FoldChange"], alpha=0.5, color=d['color'], s=5)
+            axis.scatter(df1["log2FoldChange"], df2["log2FoldChange"], alpha=0.5, color=d['color'], s=5, rasterized=True)
             df1 = df[df["comparison"] == cond1].ix[inter]
             df2 = df[df["comparison"] == cond2].ix[inter]
-            axis.scatter(df1["log2FoldChange"], df2["log2FoldChange"], alpha=0.85, color="orange", s=15)
+            axis.scatter(df1["log2FoldChange"], df2["log2FoldChange"], alpha=0.85, color="orange", s=15, rasterized=True)
             axis.set_xlabel(cond1)
             axis.set_ylabel(cond2)
 
@@ -2115,7 +2127,6 @@ class Analysis(object):
             axis.text(0.1, -3, "Pearson's r:{}".format(r))
 
         sns.despine(fig)
-        fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.fold_change.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
         fig.savefig(os.path.join(output_dir, "%s.%s.group_combinations.scatter_plots.fold_change.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         # save unique differential regions
@@ -2140,19 +2151,19 @@ class Analysis(object):
 
         # Heatmaps
         # Comparison level
-        g = sns.clustermap(np.log2(1 + df2[groups]).corr(), xticklabels=False, cbar_kws={"label": "Pearson correlation\non differential regions"}, cmap="Spectral_r")
+        g = sns.clustermap(np.log2(1 + df2[groups]).corr(), xticklabels=False, cbar_kws={"label": "Pearson correlation\non differential regions"}, cmap="Spectral_r", rasterized=True)
         g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.clustermap.corr.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.clustermap.corr.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
-        g = sns.clustermap(np.log2(1 + df2[groups]), yticklabels=False, cbar_kws={"label": "Accessibility of\ndifferential regions"}, cmap="BuGn")
+        g = sns.clustermap(np.log2(1 + df2[groups]), yticklabels=False, cbar_kws={"label": "Accessibility of\ndifferential regions"}, cmap="BuGn", rasterized=True)
         g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.clustermap.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.clustermap.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         g = sns.clustermap(
             np.log2(1 + df2[groups]), yticklabels=False, z_score=0, metric="correlation",
-            cbar_kws={"label": "Z-score of accessibility\non differential regions"}, vmin=-3, vmax=3)
+            cbar_kws={"label": "Z-score of accessibility\non differential regions"}, vmin=-3, vmax=3, rasterized=True)
         g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.clustermap.z0.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.clustermap.z0.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         # # "Cluster" regions based on patttern
         # ll = g.z_score(np.log2(1 + df2[groups]), axis=0)
@@ -2181,37 +2192,37 @@ class Analysis(object):
         p_values = -np.log10(pd.pivot_table(df.reset_index(), index="index", columns="comparison", values="padj"))
 
         # fold
-        g = sns.clustermap(fold_changes.corr(), xticklabels=False, cbar_kws={"label": "Pearson correlation\non fold-changes"}, cmap="Spectral_r", vmin=0, vmax=1)
-        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.fold_changes.clustermap.corr.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g = sns.clustermap(fold_changes.corr(), xticklabels=False, cbar_kws={"label": "Pearson correlation\non fold-changes"}, cmap="Spectral_r", vmin=0, vmax=1, rasterized=True)
+        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, ha="right")
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.fold_changes.clustermap.corr.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
-        g = sns.clustermap(fold_changes.ix[sig], metric="correlation", yticklabels=False, cbar_kws={"label": "Fold-changes of\ndifferential regions"}, vmin=-3, vmax=3)
-        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.fold_changes.clustermap.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g = sns.clustermap(fold_changes.ix[sig], metric="correlation", yticklabels=False, cbar_kws={"label": "Fold-changes of\ndifferential regions"}, vmin=-3, vmax=3, rasterized=True)
+        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, ha="right")
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.fold_changes.clustermap.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         # p-values
-        g = sns.clustermap(p_values.corr(), xticklabels=False, cbar_kws={"label": "Pearson correlation\non p-values"}, cmap="Spectral_r", vmin=0, vmax=1)
-        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.p_values.clustermap.corr.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g = sns.clustermap(p_values.corr(), xticklabels=False, cbar_kws={"label": "Pearson correlation\non p-values"}, cmap="Spectral_r", vmin=0, vmax=1, rasterized=True)
+        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, ha="right")
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.p_values.clustermap.corr.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
-        g = sns.clustermap(p_values.ix[sig], yticklabels=False, cbar_kws={"label": "-log10(p-value) of\ndifferential regions"}, vmin=0, vmax=20, cmap="Spectral_r")
-        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.p_values.clustermap.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g = sns.clustermap(p_values.ix[sig], yticklabels=False, cbar_kws={"label": "-log10(p-value) of\ndifferential regions"}, vmin=0, vmax=20, cmap="Spectral_r", rasterized=True)
+        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, ha="right")
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.groups.p_values.clustermap.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         # Sample level
-        g = sns.clustermap(df2[[s.name for s in sel_samples]].corr(), xticklabels=False, cbar_kws={"label": "Pearson correlation\non differential regions"}, cmap="Spectral_r")
-        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.samples.clustermap.corr.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g = sns.clustermap(df2[[s.name for s in sel_samples]].corr(), xticklabels=False, cbar_kws={"label": "Pearson correlation\non differential regions"}, cmap="Spectral_r", rasterized=True)
+        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, ha="right")
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.samples.clustermap.corr.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
-        g = sns.clustermap(df2[[s.name for s in sel_samples]], yticklabels=False, cbar_kws={"label": "Accessibility of\ndifferential regions"}, cmap="BuGn", vmin=0)
-        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.samples.clustermap.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g = sns.clustermap(df2[[s.name for s in sel_samples]], yticklabels=False, cbar_kws={"label": "Accessibility of\ndifferential regions"}, cmap="BuGn", vmin=0, rasterized=True)
+        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, ha="right")
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.samples.clustermap.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         sel_samples = [s for s in sel_samples if s.knockout not in ["SMARCC2"]]
         sel_samples = [s for s in sel_samples if "GFP" not in s.name]
-        g = sns.clustermap(df2[[s.name for s in sel_samples]], yticklabels=False, z_score=0, metric="correlation", cbar_kws={"label": "Z-score of accessibility\non differential regions"})
-        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.samples.clustermap.z0.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+        g = sns.clustermap(df2[[s.name for s in sel_samples]], yticklabels=False, z_score=0, metric="correlation", cbar_kws={"label": "Z-score of accessibility\non differential regions"}, rasterized=True)
+        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, ha="right")
+        g.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.samples.clustermap.z0.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         from scipy.cluster.hierarchy import fcluster
         clusters = fcluster(g.dendrogram_row.linkage, 6, criterion="maxclust")
@@ -2220,9 +2231,11 @@ class Analysis(object):
             df2[[s.name for s in sel_samples]], yticklabels=False,
             row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage,
             z_score=0, metric="correlation", cbar_kws={"label": "Z-score of accessibility\non differential regions"},
-            row_colors=[colors[i] if i in [1, 5, 6] else (1., 1., 1.) for i in clusters])
-        g2.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-        g2.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.samples.clustermap.z0.clusters_labeled.png" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
+            row_colors=[colors[i] for i in clusters], rasterized=True)
+        # g2.ax_col_dendrogram.set_rasterized(True)
+        g2.ax_row_dendrogram.set_rasterized(True)
+        g2.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, ha="right")
+        g2.fig.savefig(os.path.join(output_dir, "%s.%s.diff_regions.samples.clustermap.z0.clusters_labeled.svg" % (output_suffix, trait)), bbox_inches="tight", dpi=300)
 
         # Examine each region cluster
         region_enr = pd.DataFrame()
@@ -2787,7 +2800,7 @@ class Analysis(object):
             axis = axes.next()
 
             # Hexbin plot
-            axis.hexbin(np.log2(1 + df2[cond1]), np.log2(1 + df2[cond2]), alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1)
+            axis.hexbin(np.log2(1 + df2[cond1]), np.log2(1 + df2[cond2]), alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1, rasterized=True)
             axis.set_xlabel(cond1)
 
             diff2 = diff[diff["comparison"] == comparison]
@@ -2820,7 +2833,7 @@ class Analysis(object):
             axis = axes.next()
 
             # hexbin
-            axis.hexbin(df2["log2FoldChange"], -np.log10(df2['pvalue']), alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1)
+            axis.hexbin(df2["log2FoldChange"], -np.log10(df2['pvalue']), alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1, rasterized=True)
 
             diff2 = diff[diff["comparison"] == comparison]
             if diff2.shape[0] > 0:
@@ -2852,7 +2865,7 @@ class Analysis(object):
             axis = axes.next()
 
             # hexbin
-            axis.hexbin(np.log2(df2["baseMean"]), df2["log2FoldChange"], alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1)
+            axis.hexbin(np.log2(df2["baseMean"]), df2["log2FoldChange"], alpha=0.85, color="black", edgecolors="white", linewidths=0, bins='log', mincnt=1, rasterized=True)
 
             diff2 = diff[diff["comparison"] == comparison]
             if diff2.shape[0] > 0:
