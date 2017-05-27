@@ -3216,6 +3216,23 @@ class Analysis(object):
                 # g.fig.savefig(os.path.join(output_dir, "enrichr.%s.only_%s.cluster_specific.z_score.svg" % (gene_set_library, direction)), bbox_inches="tight")
                 g.fig.savefig(os.path.join(output_dir, "enrichr.%s.only_%s.cluster_specific.z_score.svg" % (gene_set_library, direction)), bbox_inches="tight", dpi=300)
 
+            # network of enrichment terms
+            corr = enrichr_pivot.corr()
+            corr['from'] = corr.columns
+            net = pd.melt(corr.reset_index(), id_vars=["from"])
+
+            net2 = net[((6 ** net['value']) > 4) & (net['value'] != 1)]
+
+            net3 = pd.merge(net2, enrichr_pivot.T.reset_index(), left_on="from", right_on="description").drop("description_y", axis=1).rename(columns={"description_x": "description"})
+
+            import networkx as nx
+            g = nx.from_pandas_dataframe(net3, "from", "description", ["value"])
+            net3 = net3.set_index("from")
+            for attr in net3.columns[2:]:
+                nx.set_node_attributes(g, attr, {k: float(v) for k, v in net3[attr].to_dict().items()})
+
+            nx.write_graphml(g, '/home/arendeiro/net_go.graphml')
+
     def accessibility_expression(
             self,
             acce_dir="deseq_knockout",
