@@ -3258,8 +3258,12 @@ class Analysis(object):
         expr_fc = pd.pivot_table(data=expr, values="log2FoldChange", index="gene_name", columns="comparison", aggfunc=np.mean)
 
         # save
-        acce_fc.to_csv(os.path.join("results", "accessibility.fold_changes.pivot.gene_split.signed_max.csv"), index=False)
-        expr_fc.to_csv(os.path.join("results", "expression.fold_changes.pivot.signed_max.csv"), index=False)
+        acce_fc.to_csv(os.path.join("results", "accessibility.fold_changes.pivot.gene_split.signed_max.csv"), index=True)
+        expr_fc.to_csv(os.path.join("results", "expression.fold_changes.pivot.signed_max.csv"), index=True)
+
+        # read
+        acce_fc = pd.read_csv(os.path.join("results", "accessibility.fold_changes.pivot.gene_split.signed_max.csv"))
+        expr_fc = pd.read_csv(os.path.join("results", "expression.fold_changes.pivot.signed_max.csv"))
 
         # match indexes (genes quantified)
         expr_fc = expr_fc.ix[acce_fc.index].dropna()
@@ -3278,40 +3282,178 @@ class Analysis(object):
             # correlate
             r, p = pearsonr(a, b)
 
-            # fit lowess
-            if i == 0:
-                l = lowess(a, b, return_sorted=False)
-                # pass
-            dist = pd.DataFrame([abs(a - l), abs(b - l)]).mean()
+            # # fit lowess
+            # if i == 0:
+            #     l = lowess(a, b, return_sorted=False)
+            #     # pass
+            # dist = pd.DataFrame([abs(a - l), abs(b - l)]).mean()
 
             # plot scatter
-            axis.flat[i].scatter(a, b, s=0.5, color=plt.cm.GnBu(dist))
+            axis.flat[i].scatter(a, b, s=0.5, rasterized=True, color="gray", alpha=0.1)  #, color=plt.cm.GnBu(dist))
 
             # add title and correlation values
             axis.flat[i].set_title(ko)
             axis.flat[i].text(1, -5, s="r = {:.3f}".format(r))  # \np = {:.3f}
 
             # Color significant differently
-            # sig = expr_fc[(abs(a) > 1) & (abs(b) > 1)].index
-            sig = dist[dist > np.percentile(dist, 99)].index
+            sig = expr_fc[(abs(a) > 1) & (abs(b) > 1)].index
+            # sig = dist[dist > np.percentile(dist, 99)].index
 
-            axis.flat[i].scatter(a.ix[sig], b.ix[sig], s=1, color=sns.color_palette("Set3")[3])
+            axis.flat[i].scatter(a.ix[sig], b.ix[sig], s=1)  # , color=sns.color_palette("Set3")[3])
 
         axis[2, 0].set_ylabel("log2 fold-change (ATAC-seq)")
         axis[4, 2].set_xlabel("log2 fold-change (RNA-seq)")
-        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.99_perc.png"), bbox_inches="tight", dpi=400)
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.99_perc.no_lowess_color.svg"), bbox_inches="tight", dpi=300)
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.99_perc.png"), bbox_inches="tight", dpi=300)
 
-        # Check if genes with high agreement and increase are just already more expressed or accessible to begin with
-        g_up = sig[(pd.DataFrame([a.ix[sig], b.ix[sig]]).T > 0).all(1)]
-        g_down = sig[(pd.DataFrame([a.ix[sig], b.ix[sig]]).T < 0).all(1)]
-        self.expression.ix[g_up]
-        self.expression.ix[g_down]
-        self.accessibility.ix[sig]
-        self.expression.ix[sig]
+        # Plot per percentiles
+        # all genes
+        n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
+        fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
+        dists = pd.DataFrame()
+        means = pd.DataFrame()
+        for i, ko in enumerate(acce_fc.columns):
+            print(ko)
+            last_p = 0
+            for j, p in enumerate(np.arange(0, 101, 1)):
+                if p == 0:
+                    continue
+                b = acce_fc[ko]
+                sel_genes = b[(b > np.percentile(b, last_p)) & (b < np.percentile(b, p))].index
+                a = expr_fc.loc[sel_genes, ko].to_frame()
+                a.columns = ["gene"]
+                a["knockout"] = ko
+                a["percentile"] = p
+                dists = dists.append(a)
+                means = means.append(pd.Series([a['gene'].mean(), ko, p], index=["mean", "knockout", "percentile"]), ignore_index=True)
+                last_p = p
 
-        # Check if genes with increasing expression but no increasing accessibility are already more accessible to begin with
+        g = sns.FacetGrid(data=dists, col="knockout", col_wrap=4)
+        g.map(sns.violinplot, data=dists, x="percentile", y="gene")
 
-        # Using the native many-to-one relationships for ATAC-seq
+        g = sns.FacetGrid(data=means, col="knockout", col_wrap=4)
+        g.map(plt.scatter, data=means, x="percentile", y="mean", alpha=0.2)
+
+        # Plot per percentiles - same values for every knockout
+        # significant in both
+        percentils = np.concatenate([np.logspace(-2, np.log10(50), 50, base=10), (100 - np.logspace(-2, np.log10(50), 50, base=10))[::-1]])
+        percentil_values = pd.Series({p: np.percentile(expr_fc, p) for p in percentils})
+
+        dists = pd.DataFrame()
+        means = pd.DataFrame()
+        for i, ko in enumerate(acce_fc.columns):
+            print(ko)
+
+            # get values
+            a = expr_fc[ko]
+            b = acce_fc[ko]
+            sig = expr_fc[(abs(a) > 1) & (abs(b) > 1)].index
+
+            last_v = 0
+            for p, v in enumerate(percentil_values):
+                # if p == 0:
+                #     continue
+                # b = b[sig]
+                sel_genes = b[(b > last_v) & (b < v)].index
+                means = means.append(pd.Series([expr_fc.loc[sel_genes, ko].mean(), ko, p], index=["mean", "knockout", "percentile"]), ignore_index=True)
+                # a = expr_fc.loc[sel_genes, ko].to_frame()
+                # a.columns = ["gene"]
+                # a["knockout"] = ko
+                # a["percentile"] = p
+                # dists = dists.append(a)
+                last_v = v
+
+        n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
+        fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
+        for i, ko in enumerate(acce_fc.columns):
+            axis.flat[i].scatter(means.loc[means['knockout'] == ko, "percentile"], means.loc[means['knockout'] == ko, "mean"])
+            axis.flat[i].set_title(ko)
+
+        fig, axis = plt.subplots(1, figsize=(8, 6))
+        sns.violinplot(data=dists.groupby(['knockout', 'percentile']).mean().reset_index(), x="percentile", y="gene", ax=axis)
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.all_percentiles.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
+
+        g = sns.FacetGrid(data=dists, col="knockout", col_wrap=4)
+        g.map(sns.violinplot, data=dists, x="percentile", y="gene", col="knockout")
+
+        g = sns.FacetGrid(data=means, col="knockout", col_wrap=4)
+        g.map(plt.scatter, data=means, x="percentile", y="mean", alpha=0.2)
+
+        # By fixed bins of fold-change
+        step = 0.25
+        range_max = 5.0
+        # bins = zip(-np.arange(step, range_max + step, step)[::-1], -np.arange(0, range_max, step)[::-1])
+        bins = zip(np.arange(0, range_max, step), np.arange(step, range_max + step, step))
+        # bins = bins[:5] + bins[-5:]
+
+        dists = pd.DataFrame()
+        means = pd.DataFrame()
+        for i, ko in enumerate(acce_fc.columns):
+            print(ko)
+
+            # get values
+            a = abs(expr_fc[ko])
+            b = abs(acce_fc[ko])
+            for j, (l1, l2) in enumerate(bins):
+                sel_genes = b[(b > l1) & (b < l2)].index
+                means = means.append(pd.Series([a[sel_genes].dropna().mean(), ko, l1, l2], index=["mean", "knockout", "min", "max"]), ignore_index=True)
+                d = a[sel_genes].dropna().to_frame()
+                d.columns = ['change']
+                d["knockout"] = ko
+                d['min'] = l1
+                d['max'] = l2
+                dists = dists.append(d)
+
+        means2 = means.groupby(['max', 'min'])['mean'].mean().reset_index()
+        fig, axis = plt.subplots(1, 1, figsize=(4 * 1, 4 * 1))
+        axis.scatter(means2.loc[:, "min"], means2.loc[:, "mean"])
+        axis.set_ylabel("abs log2 fold-change (RNA-seq)")
+        axis.set_xlabel("abs log2 fold-change (ATAC-seq)")
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.absolute.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
+
+        means2 = dists.groupby(['max', 'min'])['change'].mean().reset_index()
+        fig, axis = plt.subplots(1, 1, figsize=(4 * 1, 4 * 1))
+        axis.scatter(means2.loc[:, "min"], means2.loc[:, "change"])
+        axis.axhline(0, alpha=0.2, color="black", linestyle="--")
+        axis.set_ylabel("abs log2 fold-change (RNA-seq)")
+        axis.set_xlabel("abs log2 fold-change (ATAC-seq)")
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.absolute.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
+
+        dists2 = dists[dists['min'] <= 3.0]
+        fig, axis = plt.subplots(1, 1, figsize=(4 * 1, 4 * 1))
+        sns.violinplot(dists2.loc[:, "min"], dists2.loc[:, "change"], trim=True, cut=0, ax=axis)
+        axis.set_ylabel("abs log2 fold-change (RNA-seq)")
+        axis.set_xlabel("abs log2 fold-change (ATAC-seq)")
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.absolute.cross_knockouts.violinplot.svg"), bbox_inches="tight", dpi=300)
+
+        dists2 = dists[dists['min'] <= 3.0]
+        dists2 = dists2.groupby(['knockout', 'min', 'max']).mean().reset_index()
+        n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
+        fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
+        for i, ko in enumerate(acce_fc.columns):
+            axis.flat[i].scatter(dists2.loc[dists2['knockout'] == ko, "min"], dists2.loc[dists2['knockout'] == ko, "change"])
+            axis.flat[i].set_title(ko)
+        fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.absolute.each_knockout.svg"), bbox_inches="tight", dpi=300)
+
+        # n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
+        # fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
+        # for i, ko in enumerate(acce_fc.columns):
+        #     axis.flat[i].scatter(means.loc[means['knockout'] == ko, "min"], means.loc[means['knockout'] == ko, "mean"])
+        #     axis.flat[i].axhline(0, alpha=0.2, color="black", linestyle="--")
+        #     # axis.flat[i].set_xticklabels([x[0] for x in bins])
+        #     axis.flat[i].set_title(ko)
+
+        # # Check if genes with high agreement and increase are just already more expressed or accessible to begin with
+        # g_up = sig[(pd.DataFrame([a.ix[sig], b.ix[sig]]).T > 0).all(1)]
+        # g_down = sig[(pd.DataFrame([a.ix[sig], b.ix[sig]]).T < 0).all(1)]
+        # self.expression.ix[g_up]
+        # self.expression.ix[g_down]
+        # self.accessibility.ix[sig]
+        # self.expression.ix[sig]
+
+        # # Check if genes with increasing expression but no increasing accessibility are already more accessible to begin with
+
+        # # Using the native many-to-one relationships for ATAC-seq
 
 
 def count_reads_in_intervals(bam, intervals):
