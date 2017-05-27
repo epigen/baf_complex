@@ -1537,7 +1537,7 @@ class Analysis(object):
         samples = [s for s in samples if s.name in self.expression_annotated.columns.get_level_values("sample_name") and s.library == "RNA-seq" and s.cell_line == "HAP1" and s.name not in exclude]
 
         color_dataframe = pd.DataFrame(
-            get_level_colors(self, index=self.expression_annotated[[s.name for s in samples]].columns, levels=attributes, pallete="Vega20b"),
+            self.get_level_colors(index=self.expression_annotated[[s.name for s in samples]].columns, levels=attributes, pallete="Vega20b"),
             index=attributes, columns=[s.name for s in samples])
 
         # exclude samples if needed
@@ -4226,7 +4226,7 @@ def nucleosome_changes(analysis, samples):
 
 
 def investigate_nucleosome_positions(self, samples, cluster=True):
-    df = self.prj.sheet.df[self.prj.sheet.df["library"] == "ATAC-seq"]
+    df = pd.DataFrame([s.as_series() for s in samples])
     groups = list()
     for attrs, index in df.groupby(["library", "cell_line", "knockout", "clone"]).groups.items():
         name = "_".join([a for a in attrs if not pd.isnull(a)])
@@ -4305,6 +4305,15 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
         more_ARID1ASMARCA4.to_csv(out, index=False, header=None, sep="\t")
         regions["diff_sites.more_ARID1ASMARCA4"] = out
 
+        # Gaining accessibility with BCL7B/ARID1B KO
+        more_BCL7BARID1B = get_differential(
+            diff,
+            ['BCL7B-WT', 'ARID1B-WT'],
+            [(np.greater_equal, 1), (np.greater_equal, 1)]).apply(center_series, axis=1)
+        out = os.path.join(self.results_dir, "nucleoatac", "diff_sites.more_BCL7BARID1B.bed")
+        more_BCL7BARID1B.to_csv(out, index=False, header=None, sep="\t")
+        regions["diff_sites.more_BCL7BARID1B"] = out
+
         # TFBSs
         tfs = ["CTCF", "BCL", "SMARC", "POU5F1", "SOX2", "NANOG", "TEAD4"]
         for tf in tfs:
@@ -4340,34 +4349,34 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
     signals = pd.DataFrame(columns=['group', 'region', 'label'])
     # signals = pd.read_csv(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.csv"))
 
-    import re
-    for group in [g for g in groups if any([re.match(".*%s.*" % x, g) for x in ["C631", "HAP1_ARID1", "HAP1_SMARCA"]])]:
+    # import re
+    for group in groups:  # [g for g in groups if any([re.match(".*%s.*" % x, g) for x in ["C631", "HAP1_ARID1", "HAP1_SMARCA"]])]
         output_dir = os.path.join(self.results_dir, "nucleoatac", group)
         signal_files = [
-            # ("signal", os.path.join(self.data_dir, "merged", group + ".merged.sorted.bam")),
-            # ("nucleosome", os.path.join(self.data_dir, "merged", group + ".nucleosome_reads.bam")),
-            # ("nucleosome_free", os.path.join(self.data_dir, "merged", group + ".nucleosome_free_reads.bam")),
+            ("signal", os.path.join(self.data_dir, "merged", group + ".merged.sorted.bam")),
+            ("nucleosome", os.path.join(self.data_dir, "merged", group + ".nucleosome_reads.bam")),
+            ("nucleosome_free", os.path.join(self.data_dir, "merged", group + ".nucleosome_free_reads.bam")),
             ("nucleoatac", os.path.join("results", "nucleoatac", group, group + ".nucleoatac_signal.smooth.bedgraph.gz")),
-            # ("dyads", os.path.join("results", "nucleoatac", group, group + ".nucpos.bed.gz"))
+            ("dyads", os.path.join("results", "nucleoatac", group, group + ".nucpos.bed.gz"))
         ]
-        for region_name, bed_file in [regions.items()[-1]]:
-            for label, signal_file in signal_files:
-                # Skip already done
-                if len(signals[
-                        (signals["group"] == group) &
-                        (signals["region"] == region_name) &
-                        (signals["label"] == label)
-                ]) > 0:
-                    print("Continuing", group, region_name, label)
-                    continue
+        # for region_name, bed_file in regions.items():
+        for label, signal_file in signal_files:  # [signal_files.items()[-1]]
+            # Skip already done
+            if len(signals[
+                    (signals["group"] == group) &
+                    (signals["region"] == region_name) &
+                    (signals["label"] == label)
+            ]) > 0:
+                print("Continuing", group, region_name, label)
+                continue
 
-                print(group, region_name, label)
-                df = pd.read_csv(os.path.join(output_dir, "{}.coverage_matrix.csv".format(".".join([group, region_name, label, label]))), index_col=0)
-                df = df.mean(0).reset_index(name="value").rename(columns={"index": "distance"})
-                df["group"] = group
-                df["region"] = region_name
-                df["label"] = label
-                signals = signals.append(df, ignore_index=True)
+            print(group, region_name, label)
+            df = pd.read_csv(os.path.join(output_dir, "{}.coverage_matrix.csv".format(".".join([group, region_name, label, label]))), index_col=0)
+            df = df.mean(0).reset_index(name="value").rename(columns={"index": "distance"})
+            df["group"] = group
+            df["region"] = region_name
+            df["label"] = label
+            signals = signals.append(df, ignore_index=True)
     signals.to_csv(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.csv"), index=False)
 
     signals = pd.read_csv(os.path.join(self.results_dir, "nucleoatac", "collected_coverage.csv"))
@@ -4404,7 +4413,7 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
     #
     # specific regions/samples
     specific_signals = signals[
-        (signals["group"].str.contains("ARID1|SMARCA|C631")) &
+        (signals["group"].str.contains("ARID1|BCL7B|SMARCA4|C631")) &
         (~signals["group"].str.contains("OV90|GFP")) &
 
         # (signals["region"].str.contains("diff_sites")) &
@@ -4421,15 +4430,29 @@ def investigate_nucleosome_positions(self, samples, cluster=True):
     g.add_legend()
     g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.extended.svg"), bbox_inches="tight")
 
-    # normalized (centered), zoom in center
+    # zoom in center
+    g = sns.FacetGrid(specific_signals[
+        (specific_signals["distance"] < 250) &
+        (specific_signals["distance"] > -250)],
+        hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
+    g.map(plt.plot, "distance", "value")
+    g.add_legend()
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.extended.zoom.svg"), bbox_inches="tight")
+
+    # normalized (centered)
     specific_signals["norm_values"] = specific_signals.groupby(["region", "label", "group"])["value"].apply(lambda x: (x - x.mean()) / x.std())
-    specific_signals = specific_signals[
-        (specific_signals["distance"] < 200) &
-        (specific_signals["distance"] > -200)]
     g = sns.FacetGrid(specific_signals, hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
     g.map(plt.plot, "distance", "norm_values")
     g.add_legend()
     g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.norm.svg"), bbox_inches="tight")
+
+    # zoom in center
+    g = sns.FacetGrid(specific_signals[
+        (specific_signals["distance"] < 250) &
+        (specific_signals["distance"] > -250)], hue="group", col="region", row="label", hue_order=group_order, row_order=label_order, col_order=region_order, sharex=False, sharey=False)
+    g.map(plt.plot, "distance", "norm_values")
+    g.add_legend()
+    g.savefig(os.path.join(self.results_dir, "nucleoatac", "plots", "collected_coverage.specific.norm.zoom.svg"), bbox_inches="tight")
 
     #
 
