@@ -27,8 +27,14 @@ from matplotlib.pyplot import cm
 
 from looper.models import Project
 from ngs_toolkit.atacseq import ATACSeqAnalysis
-from ngs_toolkit.chipseq import ChIPSeqAnalysis
-from ngs_toolkit.rnaseq import RNASeqAnalysis
+from ngs_toolkit.chipseq import ChIPSeqAnalysis, homer_peaks_to_bed
+from ngs_toolkit.general import (collect_differential_enrichment,
+                                 differential_analysis,
+                                 differential_enrichment, differential_overlap,
+                                 plot_differential,
+                                 plot_differential_enrichment,
+                                 unsupervised_analysis)
+from ngs_toolkit.rnaseq import RNASeqAnalysis, knockout_plot
 
 # Set settings
 pd.set_option("date_dayfirst", True)
@@ -42,134 +48,68 @@ def main():
     # Start project
     prj = Project(os.path.join("metadata", "project_config.yaml"))
     for sample in prj.samples:
-        if sample.library == "ATAC-seq":
+        if sample.library in ["ATAC-seq", "ChIP-seq"]:
             sample.filtered = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.filtered.bam")
             sample.peaks = os.path.join(sample.paths.sample_root, "peaks", sample.name + "_peaks.narrowPeak")
-
-    # ATAC-seq analysis
-    atacseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["HAP1"])]
-    atacseq_samples = [s for s in atacseq_samples if os.path.exists(s.filtered)]  # and s.pass_qc == 1
-    atacseq_samples = [s for s in atacseq_samples if s.knockout != "SMARCC2" and s.clone != "GFP"]
-    atac_analysis = ATACSeqAnalysis(
-        name="baf_complex.atacseq", prj=prj, samples=atacseq_samples)
+        elif sample.library == "RNA-seq":
+            sample.bitseq_counts = os.path.join(sample.paths.sample_root, "bowtie1_{}".format(sample.transcriptome), "bitSeq", sample.name + ".counts")
 
     # Sample's attributes
     sample_attributes = ['sample_name', 'cell_line', 'knockout', 'replicate', 'clone']
     plotting_attributes = ['knockout', 'replicate', 'clone']
 
-    # GET CONSENSUS PEAK SET, ANNOTATE IT, PLOT
-    # Get consensus peak set from all samples
-    atac_analysis.get_consensus_sites(region_type="summits")
-    atac_analysis.calculate_peak_support(region_type="summits")
+    # HAP1 ANALYSIS
+    # ATAC-seq
+    atacseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["HAP1"])]
+    atacseq_samples = [s for s in atacseq_samples if os.path.exists(s.filtered)]  # and s.pass_qc == 1
+    atacseq_samples = [s for s in atacseq_samples if s.knockout != "SMARCC2" and s.clone != "GFP"]
+    atac_analysis = ATACSeqAnalysis(name="baf_complex.atacseq", prj=prj, samples=atacseq_samples)
+    atac_analysis = main_analysis_pipeline(atac_analysis, data_type="ATAC-seq", cell_type="HAP1")
 
-    # GET CHROMATIN OPENNESS MEASUREMENTS, PLOT
-    # Get coverage values for each peak in each sample of ATAC-seq and ChIPmentation
-    atac_analysis.measure_coverage()
-    # normalize coverage values
-    atac_analysis.normalize_coverage_quantiles()
-    atac_analysis.get_peak_gccontent_length()
-    atac_analysis.normalize_gc_content()
-
-    # Annotate peaks with closest gene
-    atac_analysis.get_peak_gene_annotation()
-    # Annotate peaks with genomic regions
-    atac_analysis.get_peak_genomic_location()
-    # Annotate peaks with ChromHMM state from CD19+ cells
-    atac_analysis.get_peak_chromatin_state()
-    # Annotate peaks with closest gene, chromatin state,
-    # genomic location, mean and variance measurements across samples
-    atac_analysis.annotate()
-    atac_analysis.annotate_with_sample_metadata(attributes=sample_attributes)
-    atac_analysis.to_pickle()
-
-    # QC plots
-    # plot general peak set features
-    atac_analysis.plot_peak_characteristics()
-    # plot coverage features across peaks/samples
-    atac_analysis.plot_coverage()
-    atac_analysis.plot_variance()
-
-    # Unsupervised analysis
-    atac_analysis.unsupervised(attributes_to_plot=plotting_attributes)
-
-    # Supervised analysis
-    from ngs_toolkit.general import differential_analysis
-    comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
-    differential_analysis(
-        atac_analysis,
-        comparison_table[comparison_table['data_type'] == 'ATAC-seq'],
-        data_type="ATAC-seq",
-        samples=None,
-        covariates=None,
-        output_dir="results/differential_analysis_{data_type}",
-        output_prefix="differential_analysis",
-        alpha=0.05,
-        overwrite=True)
-
-    # Investigate global changes in accessibility
-    global_changes(atacseq_samples)
-
-
-    # RNA-seq analysis
-    rnaseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["HAP1"])]
-    rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(os.path.join(
-                      sample.paths.sample_root, "bowtie1_{}".format(sample.transcriptome),
-                      "bitSeq",
-                      sample.name + ".counts"))]  # and s.pass_qc == 1
+    # RNA-seq
+    rnaseq_samples = [s for s in prj.samples if (s.library == "RNA-seq") & (s.cell_line in ["HAP1"])]
+    rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]  # and s.pass_qc == 1
     rnaseq_samples = [s for s in rnaseq_samples if s.knockout != "SMARCC2" and s.clone != "GFP"]
-    rnaseq_analysis = RNASeqAnalysis(
-        name="baf_complex.rnaseq", prj=prj, samples=rnaseq_samples)
-
-    # Get gene expression
-    rnaseq_analysis.get_gene_expression(samples=rnaseq_samples)
-    # Unsupervised analysis
-    rnaseq_analysis.unsupervised_expression(rnaseq_samples, attributes=["knockout", "replicate", "clone"])
-    # Supervised analysis
-    rnaseq_analysis.differential_expression_analysis()
-
-    #
-
-    # See ATAC and RNA together
-    rnaseq_analysis.accessibility_expression()
+    rnaseq_analysis = RNASeqAnalysis(name="baf-complex.rnaseq", prj=prj, samples=rnaseq_samples)
+    rnaseq_analysis = main_analysis_pipeline(rnaseq_analysis, data_type="RNA-seq", cell_type="HAP1")
 
 
-    # Deeper ATAC-seq data
-    nucleosome_changes(atacseq_analysis, atacseq_samples)
-    investigate_nucleosome_positions(atacseq_samples)
-    phasograms(atacseq_samples)
+    # OV90 ANALYSIS
+    # ATAC-seq
+    atacseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["OV90"])]
+    atacseq_samples = [s for s in atacseq_samples if os.path.exists(s.filtered)]  # and s.pass_qc == 1
+    ov90_atac_analysis = ATACSeqAnalysis(name="baf_complex.ov90.atacseq", prj=prj, samples=atacseq_samples, results_dir="results_ov90")
+    ov90_atac_analysis = main_analysis_pipeline(ov90_atac_analysis, data_type="ATAC-seq", cell_type="OV90")
+
+    # RNA-seq
+    rnaseq_samples = [s for s in prj.samples if (s.library == "RNA-seq") & (s.cell_line in ["OV90"])]
+    rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]  # and s.pass_qc == 1
+    ov90_rnaseq_analysis = RNASeqAnalysis(name="baf-complex.ov90.rnaseq", prj=prj, samples=rnaseq_samples, results_dir="results_ov90")
+    ov90_rnaseq_analysis = main_analysis_pipeline(ov90_rnaseq_analysis, data_type="RNA-seq", cell_type="OV90")
 
 
     # ChIP-seq data
-    from ngs_toolkit.chipseq import homer_peaks_to_bed
-
     # Start project and analysis objects
-    prj = Project(os.path.join("metadata", "project_config.yaml"))
-    for sample in prj.samples:
-        sample.mapped = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.bam")
-        sample.filtered = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.filtered.bam")
-    analysis = ChIPSeqAnalysis(name="baf_kubicek-chip", prj=prj, samples=[s for s in prj.samples if s.library == "ChIP-seq"])
+    chipseq_analysis = ChIPSeqAnalysis(
+        name="baf_complex.chipseq", prj=prj, samples=[s for s in prj.samples if s.library == "ChIP-seq"])
 
     # read in comparison table
     comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
-
-    analysis.call_peaks_from_comparisons(
+    # call peaks
+    chipseq_analysis.call_peaks_from_comparisons(
         comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'], overwrite=False)
-
-    for comparison in comparison_table.loc[comparison_table['comparison_type'] == 'peaks', "comparison_name"].unique():
-        file = os.path.join(analysis.results_dir, "chipseq_peaks", comparison, comparison + "_homer_peaks")
-        homer_peaks_to_bed(file + ".narrowPeak", file + ".bed")
-
-    summarize_peaks_from_comparisons(comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'])
+    # summarize peaks
+    chipseq_analysis.summarize_peaks_from_comparisons(comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'])
 
     comparison_table['comparison_genome'] = 'hg19'
-    analysis.get_consensus_sites(
+    chipseq_analysis.get_consensus_sites(
         comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'],
         region_type="peaks", blacklist_bed="wgEncodeDacMapabilityConsensusExcludable.bed")
 
-    analysis.calculate_peak_support(
+    chipseq_analysis.calculate_peak_support(
         comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'])
 
-    analysis.measure_coverage()
+    chipseq_analysis.measure_coverage()
 
     # Filter out bad peaks
     c = analysis.coverage.iloc[:, :-3]
@@ -178,7 +118,6 @@ def main():
     axis[0].scatter(c.mean(axis=1), c.std(axis=1), s=5, alpha=0.5)
     qv2 = (c.std(axis=1) / c.mean(axis=1)) ** 2
     axis[1].scatter(c.mean(axis=1), qv2, s=5, alpha=0.5)
-
 
     analysis.normalize()
 
@@ -193,6 +132,201 @@ def main():
 
     g = sns.clustermap(df, cmap="RdBu_r", robust=True, yticklabels=False)# , z_score=0)
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+
+    # # Investigate global changes in accessibility
+    # global_changes(atacseq_samples)
+
+
+
+
+    # See ATAC and RNA together
+    rnaseq_analysis.accessibility_expression()
+
+
+    # Deeper ATAC-seq data
+    nucleosome_changes(atacseq_analysis, atacseq_samples)
+    investigate_nucleosome_positions(atacseq_samples)
+    phasograms(atacseq_samples)
+
+
+
+def main_analysis_pipeline(analysis, data_type, cell_type):
+
+    if data_type == "ATAC-seq":
+
+        # GET CONSENSUS PEAK SET, ANNOTATE IT, PLOT
+        # Get consensus peak set from all samples
+        analysis.get_consensus_sites(region_type="summits")
+        analysis.calculate_peak_support(region_type="summits")
+
+        # GET CHROMATIN OPENNESS MEASUREMENTS, PLOT
+        # Get coverage values for each peak in each sample of ATAC-seq and ChIPmentation
+        analysis.measure_coverage()
+        # normalize coverage values
+        analysis.normalize_coverage_quantiles()
+        analysis.get_peak_gccontent_length()
+        analysis.normalize_gc_content()
+
+        # Annotate peaks with closest gene
+        analysis.get_peak_gene_annotation()
+        # Annotate peaks with genomic regions
+        analysis.get_peak_genomic_location()
+        # Annotate peaks with ChromHMM state from CD19+ cells
+        analysis.get_peak_chromatin_state(chrom_state_file="data/external/HAP1_12_segments.annotated.bed")
+        # Annotate peaks with closest gene, chromatin state,
+        # genomic location, mean and variance measurements across samples
+        analysis.annotate()
+        analysis.annotate_with_sample_metadata(attributes=sample_attributes)
+        analysis.to_pickle()
+
+        # QC plots
+        # plot general peak set features
+        analysis.plot_peak_characteristics()
+        # plot coverage features across peaks/samples
+        analysis.plot_coverage()
+        analysis.plot_variance()
+
+        quant_matrix = "accessibility"
+        feature_name = "sites"
+
+
+    if data_type == "RNA-seq":
+        # Get gene expression
+        analysis.get_gene_expression(samples=analysis.samples, attributes=["sample_name", "knockout", "replicate", "clone"])
+
+        # see expression of knocked-out genes + other complex members
+        baf_genes = pd.read_csv(os.path.join("metadata", "baf_complex_subunits.csv"), squeeze=True)
+        knockout_plot(
+            analysis=analysis,
+            knockout_genes=baf_genes,
+            output_prefix="complex_expression")
+        quant_matrix = "expression_annotated"
+        feature_name = "genes"
+
+
+    # Unsupervised analysis
+    unsupervised_analysis(
+        analysis, quant_matrix=quant_matrix, samples=None,
+        attributes_to_plot=plotting_attributes, plot_prefix="all_{}".format(feature_name),
+        plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
+        output_dir="{results_dir}/unsupervised")
+    # only with certain subunits
+    if not 'ov90' in analysis.name:
+        to_exclude = ['SMARCA4', "SMARCC1", "ARID1A", "ARID1B", "BCL7B"]
+        unsupervised_analysis(
+            analysis, quant_matrix=quant_matrix,
+            samples=[s for s in analysis.samples if s.knockout not in to_exclude],
+            attributes_to_plot=plotting_attributes, plot_prefix="all_{}_no_strong_knockouts".format(feature_name),
+            plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
+            output_dir="{results_dir}/unsupervised")
+
+
+    # Supervised analysis
+    comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
+    comparison_table = comparison_table[(
+        comparison_table['data_type'] == data_type) &
+        (comparison_table['cell_type'] == cell_type) &
+        (comparison_table['comparison_type'] == 'differential')]
+    analysis.differential_results = differential_analysis(
+        analysis,
+        comparison_table,
+        data_type=data_type,
+        output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+        covariates=None,
+        alpha=0.05,
+        overwrite=True)
+    analysis.differential_results = analysis.differential_results.set_index("index")
+    analysis.to_pickle()
+
+    if not 'ov90' in analysis.name:
+        differential_overlap(
+            analysis.differential_results,
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            data_type=data_type)
+
+    plot_differential(
+        analysis,
+        analysis.differential_results,
+        comparison_table=comparison_table,
+        output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+        data_type=data_type,
+        alpha=0.01,
+        corrected_p_value=True,
+        fold_change=1,
+        rasterized=True, robust=True)
+
+    # repeat without SMARCA4, ARID1A, SMARCC1
+    if not 'ov90' in analysis.name:
+        plot_differential(
+            analysis,
+            analysis.differential_results[
+                ~analysis.differential_results['comparison_name'].isin(
+                    ['SMARCA4', 'ARID1A', 'SMARCC1'])],
+            comparison_table=comparison_table,
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            output_prefix="differential_analysis.no_very_strong",
+            alpha=0.01,
+            corrected_p_value=True,
+            fold_change=1,
+            rasterized=True, robust=True)
+        # repeat without the strongest guys
+        plot_differential(
+            analysis,
+            analysis.differential_results[
+                ~analysis.differential_results['comparison_name'].isin(
+                    ['SMARCA4', 'ARID1A', 'SMARCC1', "BCL7B", "ARID1B"])],
+            comparison_table=comparison_table,
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            output_prefix="differential_analysis.no_strong",
+            alpha=0.01,
+            corrected_p_value=True,
+            fold_change=1,
+            rasterized=True, robust=True)
+
+    differential_enrichment(
+        analysis,
+        analysis.differential_results,
+        data_type=data_type,
+        output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+        genome="hg19",
+        directional=True,
+        max_diff=1000,
+        sort_var="pvalue",
+        as_jobs=True)
+    collect_differential_enrichment(
+        analysis.differential_results,
+        directional=True,
+        data_type=data_type,
+        output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+        permissive=True)
+
+    if data_type == "RNA-seq":
+        enrichment_table = pd.read_csv(
+            os.path.join("{}/differential_analysis_{}".format(analysis.results_dir, data_type), "differential_analysis.enrichr.csv"))
+
+        plot_differential_enrichment(
+            enrichment_table,
+            "enrichr",
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            direction_dependent=True,
+            top_n=5)
+    elif data_type == "ATAC-seq":
+        for enrichment_name, enrichment_type in [('motif', 'meme_ame'), ('lola', 'lola'), ('enrichr', 'enrichr')]:
+            enrichment_table = pd.read_csv(
+                os.path.join("{}/differential_analysis_{}".format(analysis.results_dir, data_type), "differential_analysis" + ".{}.csv".format(enrichment_type)))
+
+            plot_differential_enrichment(
+                enrichment_table,
+                enrichment_name,
+                data_type=data_type,
+                output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+                direction_dependent=True,
+                top_n=5 if enrichment_name != "motif" else 300)
+
+    return analysis
 
 
 def pickle_me(function):
