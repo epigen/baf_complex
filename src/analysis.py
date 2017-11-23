@@ -9,19 +9,14 @@ if __name__ == '__main__':
     matplotlib.use('Agg')
 
 import cPickle as pickle
-import multiprocessing
 import os
 import sys
-from argparse import ArgumentParser
-from collections import Counter
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import parmap
 import pybedtools
-import pysam
 import seaborn as sns
 from matplotlib.pyplot import cm
 
@@ -48,7 +43,8 @@ def main():
     # Start project
     prj = Project(os.path.join("metadata", "project_config.yaml"))
     for sample in prj.samples:
-        if sample.library in ["ATAC-seq", "ChIP-seq"]:
+        if sample.library in ["ATAC-seq", "ChIP-seq", "ChIPmentation"]:
+            sample.mapped = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.bam")
             sample.filtered = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.filtered.bam")
             sample.peaks = os.path.join(sample.paths.sample_root, "peaks", sample.name + "_peaks.narrowPeak")
         elif sample.library == "RNA-seq":
@@ -90,8 +86,10 @@ def main():
 
     # ChIP-seq data
     # Start project and analysis objects
+    chipseq_samples = [s for s in prj.samples if s.library in ["ChIP-seq", "ChIPmentation"]]
+    chipseq_samples = [s for s in chipseq_samples if os.path.exists(s.filtered)]
     chipseq_analysis = ChIPSeqAnalysis(
-        name="baf_complex.chipseq", prj=prj, samples=[s for s in prj.samples if s.library == "ChIP-seq"])
+        name="baf_complex.chipseq", prj=prj, samples=chipseq_samples)
 
     # read in comparison table
     comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
@@ -101,37 +99,25 @@ def main():
     # summarize peaks
     chipseq_analysis.summarize_peaks_from_comparisons(comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'])
 
-    comparison_table['comparison_genome'] = 'hg19'
-    chipseq_analysis.get_consensus_sites(
-        comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'],
-        region_type="peaks", blacklist_bed="wgEncodeDacMapabilityConsensusExcludable.bed")
-
-    chipseq_analysis.calculate_peak_support(
-        comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'])
-
+    # set peak set to ATAC-seq and quantify all ChIP-seq samples in there
+    chipseq_analysis.set_consensus_sites(atac_analysis.sites.fn)
     chipseq_analysis.measure_coverage()
+    chipseq_analysis.normalize()
+    chipseq_analysis.annotate(quant_matrix="coverage_qnorm")
+    chipseq_analysis.annotate_with_sample_metadata(attributes=['sample_name', 'ip', 'cell_line', 'knockout', 'replicate', 'clone'])
+    chipseq_analysis.to_pickle()
 
-    # Filter out bad peaks
-    c = analysis.coverage.iloc[:, :-3]
-    
-    fig, axis = plt.subplots(1, 3, figsize=(3 * 4, 1 * 4))
-    axis[0].scatter(c.mean(axis=1), c.std(axis=1), s=5, alpha=0.5)
-    qv2 = (c.std(axis=1) / c.mean(axis=1)) ** 2
-    axis[1].scatter(c.mean(axis=1), qv2, s=5, alpha=0.5)
+    # Unsupervised analysis
+    unsupervised_analysis(
+        chipseq_analysis, data_type="ATAC-seq", quant_matrix=None, samples=None,
+        attributes_to_plot=['ip', 'replicate'], plot_prefix="chipseq_all_peaks",
+        plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
+        output_dir="{results_dir}/unsupervised")
 
-    analysis.normalize()
+    # Compare with ATAC-seq
+    diff_atac_heatmap_with_chip(
+        atac_analysis, chipseq_analysis,
 
-    df = analysis.coverage.loc[qv2 < 6,
-        (analysis.coverage.dtypes == np.int) &
-        (~analysis.coverage.columns.str.contains("Input|IgG|opto|start|end"))].dropna()
-    df = np.log2(1 + (df / df.sum(axis=0)) * 1e4)
-
-    df = analysis.coverage_qnorm.loc[qv2 < 6,
-        (analysis.coverage_qnorm.dtypes == np.float) &
-        (~analysis.coverage_qnorm.columns.str.contains("Input|IgG|opto"))].dropna()
-
-    g = sns.clustermap(df, cmap="RdBu_r", robust=True, yticklabels=False)# , z_score=0)
-    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
 
     # # Investigate global changes in accessibility
     # global_changes(atacseq_samples)
@@ -151,6 +137,12 @@ def main():
 
 
 def main_analysis_pipeline(analysis, data_type, cell_type):
+    """
+    Main analysis pipeline for ATAC-seq and RNA-seq.
+    Gets quantification matrices, normalizes them,
+    performes unsupervised and supervised analysis and
+    gets and plots enrichments for supervised analysis.
+    """
 
     if data_type == "ATAC-seq":
 
@@ -327,6 +319,139 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
                 top_n=5 if enrichment_name != "motif" else 300)
 
     return analysis
+
+
+def diff_atac_heatmap_with_chip(
+        atac_analysis, chipseq_analysis,
+        output_dir="results"):
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    output_prefix = "atac-chip_comparison"
+    quantity = "accesibility"
+    var_name = "regions"
+    robust = True
+    rasterized = True
+
+    results = atac_analysis.differential_results
+    results['diff']
+
+    comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
+    comparison_table = comparison_table[(
+        comparison_table['data_type'] == "ATAC-seq") &
+        (comparison_table['cell_type'] == "HAP1") &
+        (comparison_table['comparison_type'] == 'differential')]
+
+    atac_matrix = atac_analysis.accessibility
+
+    # PLOTS
+    comparisons = sorted(results["comparison_name"].drop_duplicates())
+    n_side = int(np.ceil(np.sqrt(len(comparisons))))
+
+    # Observe values of variables across all comparisons
+    all_diff = results[results["diff"] == True].index.drop_duplicates()
+    sample_cols = atac_matrix.columns.get_level_values("sample_name").tolist()
+
+    if comparison_table is not None:
+        if results["comparison_name"].drop_duplicates().shape[0] > 1:
+            groups = pd.DataFrame()
+            for sample_group in results["comparison_name"].drop_duplicates():
+                c = comparison_table.loc[comparison_table["sample_group"] == sample_group, "sample_name"].drop_duplicates()
+                if c.shape[0] > 0:
+                    groups.loc[:, sample_group] = atac_matrix[[d for d in c if d in sample_cols]].mean(axis=1)
+
+            if groups.empty:
+                # It seems comparisons were not done in a all-versus-all fashion
+                for group in comparison_table["sample_group"].drop_duplicates():
+                    c = comparison_table.loc[comparison_table["sample_group"] == group, "sample_name"].drop_duplicates()
+                    if c.shape[0] > 0:
+                        groups.loc[:, group] = atac_matrix[c].mean(axis=1)
+
+            # Select only differential regions from groups
+            groups = groups.loc[all_diff, :]
+
+            figsize = (max(5, 0.12 * groups.shape[1]), 5)
+            # Heatmaps
+            # Comparison level
+            g = sns.clustermap(
+                groups,
+                yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
+                metric="correlation", rasterized=True, figsize=figsize, vmin=0)
+            g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+            g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.groups.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+
+            g = sns.clustermap(
+                groups,
+                yticklabels=False, z_score=0, cbar_kws={"label": "Z-score of {}\non differential {}".format(quantity, var_name)},
+                metric="correlation", rasterized=True, figsize=figsize)
+            g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+            g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.groups.clustermap.z0.svg".format(var_name)), bbox_inches="tight", dpi=300)
+
+    # Fold-changes and P-values
+    # pivot table of genes vs comparisons
+    fold_changes = pd.pivot_table(results.loc[all_diff, :].reset_index(), index=results.index.name, columns="comparison_name", values="log2FoldChange")
+    p_values = -np.log10(pd.pivot_table(results.loc[all_diff, :].reset_index(), index=results.index.name, columns="comparison_name", values="padj"))
+
+    # fold
+    if fold_changes.shape[1] > 1:
+        figsize = (max(5, 0.12 * fold_changes.shape[1]), 5)
+
+        g = sns.clustermap(fold_changes.corr(),
+            xticklabels=False, cbar_kws={"label": "Pearson correlation\non fold-changes"},
+            cmap="BuGn", vmin=0, vmax=1, metric="correlation", rasterized=True, figsize=(figsize[0], figsize[0]))
+        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, fontsize="xx-small")
+        g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.groups.fold_changes.clustermap.corr.svg".format(var_name)), bbox_inches="tight", dpi=300, metric="correlation")
+
+        g = sns.clustermap(fold_changes.loc[all_diff, :],
+            yticklabels=False, cbar_kws={"label": "Fold-change of\ndifferential {}".format(var_name)},
+            robust=True, metric="correlation", rasterized=True, figsize=figsize)
+        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+        g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.groups.fold_changes.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+
+    # Sample level
+    if type(atac_matrix.columns) is pd.core.indexes.multi.MultiIndex:
+        atac_matrix.columns = atac_matrix.columns.get_level_values("sample_name")
+
+    atac_matrix = atac_matrix.loc[all_diff, :]
+    figsize = (max(5, 0.12 * atac_matrix.shape[1]), 5)
+
+    g2 = sns.clustermap(atac_matrix,
+        yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
+        xticklabels=True, row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage,
+        vmin=0, metric="correlation", figsize=figsize, rasterized=rasterized, robust=robust)
+    g2.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+    g2.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+
+    g3 = sns.clustermap(atac_matrix,
+        yticklabels=False, z_score=0, cbar_kws={"label": "Z-score of {}\non differential {}".format(quantity, var_name)},
+        xticklabels=True, row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage,
+        metric="correlation", figsize=figsize, rasterized=rasterized, robust=robust)
+    g3.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+    g3.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.z0.svg".format(var_name)), bbox_inches="tight", dpi=300)
+
+
+    # add ChIP-seq data with same clustering
+    # but z-scored internally
+    regs = atac_matrix.iloc[g.dendrogram_row.reordered_ind, :].index
+    c = chipseq_analysis.accessibility.loc[regs, :]
+
+    figsize = (0.12 * c.shape[1], 5)
+
+    from scipy.stats import zscore
+    chip_z = pd.DataFrame(zscore(c, axis=0), index=regs, columns=chipseq_analysis.accessibility.columns)
+
+    fig, axis = plt.subplots(1, figsize=figsize)
+    sns.heatmap(chip_z, yticklabels=False, ax=axis, vmin=-3, vmax=3, rasterized=rasterized)
+    axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
+    fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+
+    chip_z = pd.DataFrame(zscore(c, axis=1), index=regs, columns=chipseq_analysis.accessibility.columns)
+    fig, axis = plt.subplots(1, figsize=figsize)
+    sns.heatmap(chip_z, yticklabels=False, ax=axis, vmin=-3, vmax=3, rasterized=rasterized)
+    axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
+    fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.clustermap.z1.svg".format(var_name)), bbox_inches="tight", dpi=300)
 
 
 def enrichment_network():
