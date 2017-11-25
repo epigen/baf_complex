@@ -747,6 +747,158 @@ def pBAF_vs_BAF(chispeq_analysis, output_dir="{results_dir}/pBAF_vs_BAF"):
                             ".baf_peaks.pBAF_vs_BAF.differential.all_enrichments.<10kb.barplot.svg"), bbox_inches="tight", dpi=300)
 
 
+def synthetic_letality(
+        output_dir="{results_dir}/synthetic_lethality"):
+
+    if "{results_dir}" in output_dir:
+        output_dir = output_dir.format(results_dir=chipseq_analysis.results_dir)
+
+    sel_vars = [
+        "CellLine", "GeneSymbol", "Replicate", "Hit",
+        "TreatmentMean_all", "ControlMean_all", "TreatmentSD_all", "ControlSD_all",
+        "pValue_all", "pLogP_all", "DeltaPOC"]
+    num_vars = sel_vars[4:]
+
+    df = pd.read_csv(os.path.join("metadata", "original", "20171120_inclOutliers_inclHits_2.txt"), sep="\t", decimal=",")
+    df = df[sel_vars]
+    df['cell_line'] = "HAP1"
+
+    # Curate/sanitize
+    df.loc[df['CellLine'].str.contains("A549"), "cell_line"] = "A549"
+    df['knockout'] = df['CellLine']
+    df['knockout'] = df['knockout'].str.replace("A549 ", "")
+    df.loc[(df['knockout'] == "WT") & (df['cell_line'] == "A549"), 'knockout'] = "SMARCA4"
+    df.loc[df['knockout'] == "SMARCA4 REC", 'knockout'] = "WT"
+    df.loc[df['knockout'].str.startswith("ARID1A"), 'knockout'] = "ARID1A"
+    df.loc[df['knockout'].str.startswith("SMARCA4"), 'knockout'] = "SMARCA4"
+    df["clone"] = df['CellLine'].str.split(" ").apply(lambda x: x[-1])
+    df['knockdown'] = df['GeneSymbol']
+    for var_ in num_vars:
+        df[var_] = df[var_].astype(float)
+
+    # only single knockdowns
+    df2 = df.loc[~df["knockdown"].astype(str).str.contains("_| "), :]
+
+    for d, label in [(df, "multiple_KDs"), (df2, "single_KDs")]:
+
+        # heatmaps
+        fig, axis = plt.subplots(2, 2, figsize=(8, 8))
+        for i, cell_line in enumerate(d['cell_line'].unique()):
+            piv = pd.pivot_table(data=d.loc[d['cell_line'] == cell_line],
+                index="knockdown", columns="knockout", values="pLogP_all")
+
+            sns.heatmap(piv, cbar_kws={"label": "-log10(synthetic interaction)"}, ax=axis[i, 0])
+            sns.heatmap(pd.DataFrame(zscore(piv, 0), index=piv.index, columns=piv.columns),
+                cbar_kws={"label": "Synthetic interaction\n(column Z-score)"}, ax=axis[i, 1])
+
+            axis[i, 0].set_title(cell_line)
+            axis[i, 1].set_title(cell_line)
+
+        for ax in axis.flatten():
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=90, fontsize="xx-small")
+            ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize="xx-small")
+        fig.savefig(os.path.join(output_dir, chipseq_analysis.name +
+                                ".{}.p_value.heatmaps.svg".format(label)), bbox_inches="tight", dpi=300)
+
+        g = sns.clustermap(d.corr(), metric="correlation", cbar_kws={"label": "Distance in synthetic interactions\n(Euclidean distance)"})
+        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+        g.savefig(os.path.join(output_dir, chipseq_analysis.name + ".{}.correlation.euclidean.svg".format(label)), bbox_inches="tight", dpi=300)
+
+        g = sns.clustermap(d.corr(), metric="correlation", cbar_kws={"label": "Distance in synthetic interactions\n(Pearson correlation)"})
+        g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+        g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+        g.savefig(os.path.join(output_dir, chipseq_analysis.name + ".{}.correlation.pearson.svg".format(label)), bbox_inches="tight", dpi=300)
+
+
+    # Compare with similarity in ATAC-seq and RNA-seq
+    screen = pd.pivot_table(data=df2.loc[df2['cell_line'] == "HAP1"],
+                index="knockdown", columns="knockout", values="pLogP_all")
+    screen_corr = screen.corr()
+    screen_corr.index.name = "k1"
+    screen_corr.columns.name = "k2"
+    screen_m = pd.melt(screen_corr.reset_index(), id_vars='k1', value_name='screen')
+    screen_m['k1'] = screen_m['k1'].str.replace("ACTIN", "ACTB")
+    screen_m['k2'] = screen_m['k2'].str.replace("ACTIN", "ACTB")
+    atac_corr = atac_analysis.accessibility.T.groupby("knockout").mean().T.corr()
+    atac_corr.index.name = "k1"
+    atac_corr.columns.name = "k2"
+    atac_corr_m = pd.melt(atac_corr.reset_index(), id_vars='k1', value_name='atac')
+    rna_corr = rnaseq_analysis.expression_annotated.T.groupby("knockout").mean().T.corr()
+    rna_corr.index.name = "k1"
+    rna_corr.columns.name = "k2"
+    rna_corr_m = pd.melt(rna_corr.reset_index(), id_vars='k1', value_name='rna')
+
+    corrs = (screen_m.set_index(['k1', 'k2'])
+        .join(atac_corr_m.set_index(['k1', 'k2']))
+        .join(rna_corr_m.set_index(['k1', 'k2'])))
+
+    baf_members = ["ARID1A", "ARID1B"]
+    pbaf_members = ["ARID2", "PBRM1", "BRD9", "PHF10", "DPF1"]
+
+    corrs['baf'] = (corrs.index.get_level_values("k1").isin(baf_members).astype(int) + corrs.index.get_level_values("k2").isin(baf_members).astype(int))
+    corrs['pbaf'] = -(corrs.index.get_level_values("k1").isin(pbaf_members).astype(int) + corrs.index.get_level_values("k2").isin(pbaf_members).astype(int))
+    corrs['color'] = corrs['baf'] + corrs['pbaf']
+    corrs.loc[(corrs['baf'] == 1) & (corrs['pbaf'] == -1), 'color'] = 3
+
+    fig, axis = plt.subplots(1, 2, figsize=(8, 4))
+    cmap = plt.get_cmap("coolwarm")
+    cmap2 = plt.get_cmap("PuOr")
+    norm = matplotlib.colors.Normalize(vmin=-2, vmax=2)
+    for i, data_type in enumerate(['atac', 'rna']):
+
+        axis[i].scatter(
+            corrs[data_type], corrs['screen'], alpha=0.5, s=25,
+            color=cmap(norm(corrs['color'])), rasterized=True)
+        axis[i].scatter(
+            corrs.loc[(corrs.color == 3), data_type], corrs.loc[(corrs.color == 3), 'screen'], alpha=0.5, s=25,
+            color="black", rasterized=True)
+        axis[i].set_xlabel(data_type.swapcase())
+        axis[i].set_ylabel("Screen")
+    fig.savefig(os.path.join("results", "synthetic_lethality", "correlation_with_ATAC_RNA.svg"), bbox_inches="tight", dpi=300)
+
+
+    # Correlation of fold-changes
+    atac_corr = pd.pivot_table(atac_analysis.differential_results.reset_index(), index='region', columns='comparison_name', values='log2FoldChange').corr()
+    atac_corr.index.name = "k1"
+    atac_corr.columns.name = "k2"
+    atac_corr_m = pd.melt(atac_corr.reset_index(), id_vars='k1', value_name='atac')
+    rna_corr = pd.pivot_table(rnaseq_analysis.differential_results.reset_index(), index='gene_name', columns='comparison_name', values='log2FoldChange').corr()
+    rna_corr.index.name = "k1"
+    rna_corr.columns.name = "k2"
+    rna_corr_m = pd.melt(rna_corr.reset_index(), id_vars='k1', value_name='rna')
+
+
+    corrs = (screen_m.set_index(['k1', 'k2'])
+        .join(atac_corr_m.set_index(['k1', 'k2']))
+        .join(rna_corr_m.set_index(['k1', 'k2'])))
+
+    baf_members = ["ARID1A", "ARID1B"]
+    pbaf_members = ["ARID2", "PBRM1", "BRD9", "PHF10", "DPF1"]
+
+    corrs['baf'] = (corrs.index.get_level_values("k1").isin(baf_members).astype(int) + corrs.index.get_level_values("k2").isin(baf_members).astype(int))
+    corrs['pbaf'] = -(corrs.index.get_level_values("k1").isin(pbaf_members).astype(int) + corrs.index.get_level_values("k2").isin(pbaf_members).astype(int))
+    corrs['color'] = corrs['baf'] + corrs['pbaf']
+    corrs.loc[(corrs['baf'] == 1) & (corrs['pbaf'] == -1), 'color'] = 3
+
+    fig, axis = plt.subplots(1, 2, figsize=(8, 4))
+    cmap = plt.get_cmap("coolwarm")
+    cmap2 = plt.get_cmap("PuOr")
+    norm = matplotlib.colors.Normalize(vmin=-2, vmax=2)
+    for i, data_type in enumerate(['atac', 'rna']):
+
+        axis[i].scatter(
+            corrs[data_type], corrs['screen'], alpha=0.5, s=25,
+            color=cmap(norm(corrs['color'])), rasterized=True)
+        axis[i].scatter(
+            corrs.loc[(corrs.color == 3), data_type], corrs.loc[(corrs.color == 3), 'screen'], alpha=0.5, s=25,
+            color="black", rasterized=True)
+        axis[i].set_xlabel(data_type.swapcase())
+        axis[i].set_ylabel("Screen")
+    fig.savefig(os.path.join("results", "synthetic_lethality", "correlation_with_ATAC_RNA.fold_changes.svg"), bbox_inches="tight", dpi=300)
+
+
+
 def enrichment_network():
     # network of enrichment terms
     corr = enrichr_pivot.corr()
