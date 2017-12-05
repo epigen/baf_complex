@@ -70,6 +70,7 @@ def main():
     rnaseq_analysis = main_analysis_pipeline(rnaseq_analysis, data_type="RNA-seq", cell_type="HAP1")
 
 
+    # OTHER CELL LINES
     # OV90 ANALYSIS
     # ATAC-seq
     atacseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["OV90"])]
@@ -82,6 +83,20 @@ def main():
     rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]  # and s.pass_qc == 1
     ov90_rnaseq_analysis = RNASeqAnalysis(name="baf-complex.ov90.rnaseq", prj=prj, samples=rnaseq_samples, results_dir="results_ov90")
     ov90_rnaseq_analysis = main_analysis_pipeline(ov90_rnaseq_analysis, data_type="RNA-seq", cell_type="OV90")
+
+    # A549 ANALYSIS
+    # ATAC-seq
+    atacseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["A549"])]
+    atacseq_samples = [s for s in atacseq_samples if os.path.exists(s.filtered)]  # and s.pass_qc == 1
+    a549_atac_analysis = ATACSeqAnalysis(name="baf_complex.a549.atacseq", prj=prj, samples=atacseq_samples, results_dir="results_a549")
+    a549_atac_analysis = main_analysis_pipeline(a549_atac_analysis, data_type="ATAC-seq", cell_type="A549")
+
+    # H2122 ANALYSIS
+    # ATAC-seq
+    atacseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["H2122"])]
+    atacseq_samples = [s for s in atacseq_samples if os.path.exists(s.filtered)]  # and s.pass_qc == 1
+    h2122_atac_analysis = ATACSeqAnalysis(name="baf_complex.h2122.atacseq", prj=prj, samples=atacseq_samples, results_dir="results_h2122")
+    h2122_atac_analysis = main_analysis_pipeline(h2122_atac_analysis, data_type="ATAC-seq", cell_type="H2122")
 
 
     # ChIP-seq data
@@ -262,7 +277,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
         output_dir="{results_dir}/unsupervised")
     # only with certain subunits
-    if not 'ov90' in analysis.name:
+    if len(analysis.name.split(".")) == 2:
         to_exclude = ['SMARCA4', "SMARCC1", "ARID1A", "ARID1B", "BCL7B"]
         unsupervised_analysis(
             analysis, quant_matrix=quant_matrix,
@@ -289,7 +304,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
     analysis.differential_results = analysis.differential_results.set_index("index")
     analysis.to_pickle()
 
-    if not 'ov90' in analysis.name:
+    if len(analysis.name.split(".")) == 2:
         differential_overlap(
             analysis.differential_results,
             output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
@@ -301,13 +316,13 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         comparison_table=comparison_table,
         output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
         data_type=data_type,
-        alpha=0.01,
+        alpha=0.01 if len(analysis.name.split(".")) == 2 else 0.05,
         corrected_p_value=True,
-        fold_change=1,
+        fold_change=1 if len(analysis.name.split(".")) == 2 else None,
         rasterized=True, robust=True)
 
     # repeat without SMARCA4, ARID1A, SMARCC1
-    if not 'ov90' in analysis.name:
+    if len(analysis.name.split(".")) == 2:
         plot_differential(
             analysis,
             analysis.differential_results[
@@ -366,8 +381,11 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             top_n=5)
     elif data_type == "ATAC-seq":
         for enrichment_name, enrichment_type in [('motif', 'meme_ame'), ('lola', 'lola'), ('enrichr', 'enrichr')]:
-            enrichment_table = pd.read_csv(
-                os.path.join("{}/differential_analysis_{}".format(analysis.results_dir, data_type), "differential_analysis" + ".{}.csv".format(enrichment_type)))
+            try:
+                enrichment_table = pd.read_csv(
+                    os.path.join("{}/differential_analysis_{}".format(analysis.results_dir, data_type), "differential_analysis" + ".{}.csv".format(enrichment_type)))
+            except pd.errors.EmptyDataError:
+                continue
 
             plot_differential_enrichment(
                 enrichment_table,

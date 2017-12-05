@@ -286,3 +286,15 @@ ChIP-seq,peaks,HAP1,H3K27ac_r1_Input,0,ChIP-seq_HAP1_WT_Input_8x_r1,Input_8x_r1,
 ChIP-seq,peaks,HAP1,SMARCA4_r1_Input,1,ChIP-seq_HAP1_WT_SMARCA4_r1,SMARCA4_r1,1
 ChIP-seq,peaks,HAP1,SMARCA4_r1_Input,0,ChIP-seq_HAP1_WT_Input_1x_r1,Input_1x_r1,1
 ChIP-seq,peaks,HAP1,SMARCA4_r1_Input,0,ChIP-seq_HAP1_WT_Input_8x_r1,Input_8x_r1,1
+ATAC-seq,differential,A549,REC,1,ATAC-seq_A549_REC_r1,REC,1
+ATAC-seq,differential,A549,REC,1,ATAC-seq_A549_REC_r2,REC,1
+ATAC-seq,differential,A549,REC,0,ATAC-seq_A549_WT_r1,WT,1
+ATAC-seq,differential,A549,REC,0,ATAC-seq_A549_WT_r2,WT,1
+ATAC-seq,differential,H2122,ARID1A,1,ATAC-seq_H2122_ARID1A_r1,ARID1A,1
+ATAC-seq,differential,H2122,ARID1A,1,ATAC-seq_H2122_ARID1A_r2,ARID1A,1
+ATAC-seq,differential,H2122,ARID1A,0,ATAC-seq_H2122_WT_r1,WT,1
+ATAC-seq,differential,H2122,ARID1A,0,ATAC-seq_H2122_WT_r2,WT,1
+ATAC-seq,differential,H2122,ARID1B,1,ATAC-seq_H2122_ARID1B_r1,ARID1B,1
+ATAC-seq,differential,H2122,ARID1B,1,ATAC-seq_H2122_ARID1B_r2,ARID1B,1
+ATAC-seq,differential,H2122,ARID1B,0,ATAC-seq_H2122_WT_r1,WT,1
+ATAC-seq,differential,H2122,ARID1B,0,ATAC-seq_H2122_WT_r2,WT,1
