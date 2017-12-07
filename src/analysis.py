@@ -1010,8 +1010,33 @@ def accessibility_expression(
     expr_fc = pd.read_csv(os.path.join("results", "expression.fold_changes.pivot.signed_max.csv"))
 
     # match indexes (genes quantified)
-    expr_fc = expr_fc.ix[acce_fc.index].dropna()
-    acce_fc = acce_fc.ix[expr_fc.index].dropna().drop("WT_GFP", axis=1)
+    expr_fc = expr_fc.ix[acce_fc.index].dropna().drop(["SMARCC2"], axis=1)
+    acce_fc = acce_fc.ix[expr_fc.index].dropna().drop(["SMARCC2", "WT_GFP"], axis=1)
+
+    # Plot correlation of fold_changes
+    joint = expr_fc.set_index("gene_name").join(acce_fc.set_index("gene_name"), lsuffix="_RNA", rsuffix="_ATAC")
+    c = joint.corr()
+
+    # all vs all
+    g = sns.clustermap(c, robust=True, col_cluster=False, row_cluster=False)
+    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.savefig(os.path.join("results", "accessibility-expression.fold_change.signed_max.correlation.all.ordered.svg"))
+    g = sns.clustermap(c, robust=True, col_cluster=True, row_cluster=True)
+    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.savefig(os.path.join("results", "accessibility-expression.fold_change.signed_max.correlation.all.clustered.svg"))
+
+    # one vs other
+    g = sns.clustermap(c.loc[c.index.str.contains("ATAC"), c.columns.str.contains("RNA")].sort_index(0).sort_index(1), col_cluster=False, row_cluster=False, robust=False)
+    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.savefig(os.path.join("results", "accessibility-expression.fold_change.signed_max.correlation.ove-vs-other.ordered.svg"))
+    g = sns.clustermap(c.loc[c.index.str.contains("ATAC"), c.columns.str.contains("RNA")].sort_index(0).sort_index(1), col_cluster=True, row_cluster=True, robust=False)
+    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.savefig(os.path.join("results", "accessibility-expression.fold_change.signed_max.correlation.ove-vs-other.clustered.svg"))
+
 
     # Plot fold-changes in accessibility vs expression
     # Using gene-level measurements for ATAC-seq
