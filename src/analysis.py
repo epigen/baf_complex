@@ -793,7 +793,8 @@ def synthetic_letality(
         output_dir="{results_dir}/synthetic_lethality"):
 
     if "{results_dir}" in output_dir:
-        output_dir = output_dir.format(results_dir=chipseq_analysis.results_dir)
+        output_dir = output_dir.format("results")
+    analysis_name = "baf_complex"
 
     sel_vars = [
         "CellLine", "GeneSymbol", "Replicate", "Hit",
@@ -801,7 +802,7 @@ def synthetic_letality(
         "pValue_all", "pLogP_all", "DeltaPOC"]
     num_vars = sel_vars[4:]
 
-    df = pd.read_csv(os.path.join("metadata", "original", "20171120_inclOutliers_inclHits_2.txt"), sep="\t", decimal=",")
+    df = pd.read_csv(os.path.join("metadata", "original", "20171120_inclOutliers_inclHits_3.txt"), sep="\t", decimal=",")
     df = df[sel_vars]
     df['cell_line'] = "HAP1"
 
@@ -829,8 +830,11 @@ def synthetic_letality(
             piv = pd.pivot_table(data=d.loc[d['cell_line'] == cell_line],
                 index="knockdown", columns="knockout", values="pLogP_all")
 
-            sns.heatmap(piv, cbar_kws={"label": "-log10(synthetic interaction)"}, ax=axis[i, 0])
-            sns.heatmap(pd.DataFrame(zscore(piv, 0), index=piv.index, columns=piv.columns),
+            sns.heatmap(
+                piv, cbar_kws={"label": "-log10(synthetic interaction)"},
+                ax=axis[i, 0], xticklabels=True, yticklabels=True)
+            sns.heatmap(
+                pd.DataFrame(zscore(piv, 0), index=piv.index, columns=piv.columns), xticklabels=True, yticklabels=True,
                 cbar_kws={"label": "Synthetic interaction\n(column Z-score)"}, ax=axis[i, 1])
 
             axis[i, 0].set_title(cell_line)
@@ -839,18 +843,29 @@ def synthetic_letality(
         for ax in axis.flatten():
             ax.set_xticklabels(ax.get_xticklabels(), rotation=90, fontsize="xx-small")
             ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize="xx-small")
-        fig.savefig(os.path.join(output_dir, chipseq_analysis.name +
+        fig.savefig(os.path.join(output_dir, analysis_name +
                                 ".{}.p_value.heatmaps.svg".format(label)), bbox_inches="tight", dpi=300)
 
-        g = sns.clustermap(d.corr(), metric="correlation", cbar_kws={"label": "Distance in synthetic interactions\n(Euclidean distance)"})
+        cell_line = "HAP1"
+        piv = pd.pivot_table(data=d.loc[d['cell_line'] == cell_line],
+            index="knockdown", columns="knockout", values="pLogP_all")
+        g = sns.clustermap(
+            piv.corr(), metric="euclidean",
+            cbar_kws={"label": "Distance in synthetic interactions\n(Euclidean distance)"},
+            cmap="RdBu_r", vmin=-1, vmax=1,
+            xticklabels=True, yticklabels=True)
         g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
         g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-        g.savefig(os.path.join(output_dir, chipseq_analysis.name + ".{}.correlation.euclidean.svg".format(label)), bbox_inches="tight", dpi=300)
+        g.savefig(os.path.join(output_dir, analysis_name + ".{}.correlation.euclidean.svg".format(label)), bbox_inches="tight", dpi=300)
 
-        g = sns.clustermap(d.corr(), metric="correlation", cbar_kws={"label": "Distance in synthetic interactions\n(Pearson correlation)"})
+        g = sns.clustermap(
+            piv.corr(), metric="correlation",
+            cbar_kws={"label": "Distance in synthetic interactions\n(Pearson correlation)"},
+            cmap="RdBu_r", vmin=-1, vmax=1,
+            xticklabels=True, yticklabels=True)
         g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
         g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-        g.savefig(os.path.join(output_dir, chipseq_analysis.name + ".{}.correlation.pearson.svg".format(label)), bbox_inches="tight", dpi=300)
+        g.savefig(os.path.join(output_dir, analysis_name + ".{}.correlation.pearson.svg".format(label)), bbox_inches="tight", dpi=300)
 
 
     # Compare with similarity in ATAC-seq and RNA-seq
@@ -897,7 +912,7 @@ def synthetic_letality(
             color="black", rasterized=True)
         axis[i].set_xlabel(data_type.swapcase())
         axis[i].set_ylabel("Screen")
-    fig.savefig(os.path.join("results", "synthetic_lethality", "correlation_with_ATAC_RNA.svg"), bbox_inches="tight", dpi=300)
+    fig.savefig(os.path.join(output_dir, analysis_name + ".correlation_with_ATAC_RNA.svg"), bbox_inches="tight", dpi=300)
 
 
     # Correlation of fold-changes
@@ -937,7 +952,7 @@ def synthetic_letality(
             color="black", rasterized=True)
         axis[i].set_xlabel(data_type.swapcase())
         axis[i].set_ylabel("Screen")
-    fig.savefig(os.path.join("results", "synthetic_lethality", "correlation_with_ATAC_RNA.fold_changes.svg"), bbox_inches="tight", dpi=300)
+    fig.savefig(os.path.join(output_dir, analysis_name + ".correlation_with_ATAC_RNA.fold_changes.svg"), bbox_inches="tight", dpi=300)
 
 
 
