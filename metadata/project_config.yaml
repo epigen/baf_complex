@@ -20,7 +20,8 @@ metadata:
   submission_subdir: submission
   # pipelines_dir: the directory where the Looper will find pipeline
   # scripts (and accompanying pipeline config files) for submission.
-  pipelines_dir: /home/arendeiro/workspace/pipelines
+  # pipelines_dir: /home/arendeiro/workspace/pipelines
+  pipeline_interfaces: /home/arendeiro/workspace/open_pipelines/pipeline_interface.yaml
   # Relative paths are considered relative to this project config file.
   # Typically, this project config file is stored with the project metadata
   # sample_annotation: one-row-per-sample metadata
