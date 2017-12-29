@@ -955,6 +955,206 @@ def synthetic_letality(
     fig.savefig(os.path.join(output_dir, analysis_name + ".correlation_with_ATAC_RNA.fold_changes.svg"), bbox_inches="tight", dpi=300)
 
 
+def cross_cell_type_comparison(
+        cell_types=["A549", "H2122", "HAP1", "OV90"]):
+
+    for cell_type in cell_types:
+        diff = pd.read_csv(
+            os.path.join(
+                "results{}".format("_" + cell_type if cell_type != "HAP1" else ""),
+                "differential_analysis_ATAC-seq",
+                "differential_analysis.deseq_result.ARID1A.csv"),
+            index_col=0)
+    
+        if cell_type == "HAP1":
+            up = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] > 1) ].index
+            down = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] < -1) ].index
+        else:
+            up = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] > 0) ].index
+            down = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] < 0) ].index
+
+        # to bed
+        up_bed = pd.DataFrame([
+            map(lambda x: x[0], up.str.split(":")),
+            map(lambda x: x[1].split("-")[0], up.str.split(":")),
+            map(lambda x: x[1].split("-")[1], up.str.split(":"))], index=['chrom', 'start', 'end']).T
+        up_bed['start'] = up_bed['start'].astype(int)
+        up_bed['end'] = up_bed['end'].astype(int)
+        up_bed = up_bed.sort_values(['chrom', 'start', 'end'])
+        down_bed = pd.DataFrame([
+            map(lambda x: x[0], down.str.split(":")),
+            map(lambda x: x[1].split("-")[0], down.str.split(":")),
+            map(lambda x: x[1].split("-")[1], down.str.split(":"))], index=['chrom', 'start', 'end']).T
+        down_bed['start'] = down_bed['start'].astype(int)
+        down_bed['end'] = down_bed['end'].astype(int)
+        down_bed = down_bed.sort_values(['chrom', 'start', 'end'])
+
+
+    cell_type = "A549"
+    diff = pd.read_csv(
+        os.path.join(
+            "results{}".format("_" + cell_type.lower() if cell_type != "HAP1" else ""),
+            "differential_analysis_ATAC-seq",
+            "differential_analysis.deseq_result.REC.csv"),
+        index_col=0)
+
+    if cell_type == "HAP1":
+        up = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] > 1) ].index
+        down = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] < -1) ].index
+    else:
+        up = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] > 0) ].index
+        down = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] < 0) ].index
+
+    # to bed
+    a549_up_bed = pd.DataFrame([
+        map(lambda x: x[0], up.str.split(":")),
+        map(lambda x: x[1].split("-")[0], up.str.split(":")),
+        map(lambda x: x[1].split("-")[1], up.str.split(":"))], index=['chrom', 'start', 'end']).T
+    a549_up_bed['start'] = a549_up_bed['start'].astype(int)
+    a549_up_bed['end'] = a549_up_bed['end'].astype(int)
+    a549_up_bed = a549_up_bed.sort_values(['chrom', 'start', 'end'])
+    a549_down_bed = pd.DataFrame([
+        map(lambda x: x[0], down.str.split(":")),
+        map(lambda x: x[1].split("-")[0], down.str.split(":")),
+        map(lambda x: x[1].split("-")[1], down.str.split(":"))], index=['chrom', 'start', 'end']).T
+    a549_down_bed['start'] = a549_down_bed['start'].astype(int)
+    a549_down_bed['end'] = a549_down_bed['end'].astype(int)
+    a549_down_bed = a549_down_bed.sort_values(['chrom', 'start', 'end'])
+
+
+    cell_type = "H2122"
+    diff = pd.read_csv(
+        os.path.join(
+            "results{}".format("_" + cell_type.lower() if cell_type != "HAP1" else ""),
+            "differential_analysis_ATAC-seq",
+            "differential_analysis.deseq_result.ARID1A.csv"),
+        index_col=0)
+
+    if cell_type == "HAP1":
+        up = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] > 1) ].index
+        down = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] < -1) ].index
+    else:
+        up = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] > 0) ].index
+        down = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] < 0) ].index
+
+    # to bed
+    h2122_up_bed = pd.DataFrame([
+        map(lambda x: x[0], up.str.split(":")),
+        map(lambda x: x[1].split("-")[0], up.str.split(":")),
+        map(lambda x: x[1].split("-")[1], up.str.split(":"))], index=['chrom', 'start', 'end']).T
+    h2122_up_bed['start'] = h2122_up_bed['start'].astype(int)
+    h2122_up_bed['end'] = h2122_up_bed['end'].astype(int)
+    h2122_up_bed = h2122_up_bed.sort_values(['chrom', 'start', 'end'])
+    h2122_down_bed = pd.DataFrame([
+        map(lambda x: x[0], down.str.split(":")),
+        map(lambda x: x[1].split("-")[0], down.str.split(":")),
+        map(lambda x: x[1].split("-")[1], down.str.split(":"))], index=['chrom', 'start', 'end']).T
+    h2122_down_bed['start'] = h2122_down_bed['start'].astype(int)
+    h2122_down_bed['end'] = h2122_down_bed['end'].astype(int)
+    h2122_down_bed = h2122_down_bed.sort_values(['chrom', 'start', 'end'])
+
+
+    cell_type = "HAP1"
+    diff = pd.read_csv(
+        os.path.join(
+            "results{}".format("_" + cell_type.lower() if cell_type != "HAP1" else ""),
+            "differential_analysis_ATAC-seq",
+            "differential_analysis.deseq_result.ARID1A.csv"),
+        index_col=0)
+
+    if cell_type == "HAP1":
+        up = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] > 1) ].index
+        down = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] < -1) ].index
+    else:
+        up = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] > 0) ].index
+        down = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] < 0) ].index
+
+    # to bed
+    hap1_up_bed = pd.DataFrame([
+        map(lambda x: x[0], up.str.split(":")),
+        map(lambda x: x[1].split("-")[0], up.str.split(":")),
+        map(lambda x: x[1].split("-")[1], up.str.split(":"))], index=['chrom', 'start', 'end']).T
+    hap1_up_bed['start'] = hap1_up_bed['start'].astype(int)
+    hap1_up_bed['end'] = hap1_up_bed['end'].astype(int)
+    hap1_up_bed = hap1_up_bed.sort_values(['chrom', 'start', 'end'])
+    hap1_down_bed = pd.DataFrame([
+        map(lambda x: x[0], down.str.split(":")),
+        map(lambda x: x[1].split("-")[0], down.str.split(":")),
+        map(lambda x: x[1].split("-")[1], down.str.split(":"))], index=['chrom', 'start', 'end']).T
+    hap1_down_bed['start'] = hap1_down_bed['start'].astype(int)
+    hap1_down_bed['end'] = hap1_down_bed['end'].astype(int)
+    hap1_down_bed = hap1_down_bed.sort_values(['chrom', 'start', 'end'])
+
+    cell_type = "OV90"
+    diff = pd.read_csv(
+        os.path.join(
+            "results{}".format("_" + cell_type.lower() if cell_type != "HAP1" else ""),
+            "differential_analysis_ATAC-seq",
+            "differential_analysis.deseq_result.ARID1A.csv"),
+        index_col=0)
+
+    if cell_type == "HAP1":
+        up = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] > 1) ].index
+        down = diff[(diff['padj'] < 0.01) & (diff['log2FoldChange'] < -1) ].index
+    else:
+        up = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] > 0) ].index
+        down = diff[(diff['padj'] < 0.05) & (diff['log2FoldChange'] < 0) ].index
+
+    # to bed
+    ov90_up_bed = pd.DataFrame([
+        map(lambda x: x[0], up.str.split(":")),
+        map(lambda x: x[1].split("-")[0], up.str.split(":")),
+        map(lambda x: x[1].split("-")[1], up.str.split(":"))], index=['chrom', 'start', 'end']).T
+    ov90_up_bed['start'] = ov90_up_bed['start'].astype(int)
+    ov90_up_bed['end'] = ov90_up_bed['end'].astype(int)
+    ov90_up_bed = ov90_up_bed.sort_values(['chrom', 'start', 'end'])
+    ov90_down_bed = pd.DataFrame([
+        map(lambda x: x[0], down.str.split(":")),
+        map(lambda x: x[1].split("-")[0], down.str.split(":")),
+        map(lambda x: x[1].split("-")[1], down.str.split(":"))], index=['chrom', 'start', 'end']).T
+    ov90_down_bed['start'] = ov90_down_bed['start'].astype(int)
+    ov90_down_bed['end'] = ov90_down_bed['end'].astype(int)
+    ov90_down_bed = ov90_down_bed.sort_values(['chrom', 'start', 'end'])
+
+
+    a549_up_bed.to_csv("a549_up.bed", sep="\t", header=None, index=False)
+    a549_down_bed.to_csv("a549_down.bed", sep="\t", header=None, index=False)
+    h2122_up_bed.to_csv("h2122_up.bed", sep="\t", header=None, index=False)
+    h2122_down_bed.to_csv("h2122_down.bed", sep="\t", header=None, index=False)
+    hap1_up_bed.to_csv("hap1_up.bed", sep="\t", header=None, index=False)
+    hap1_down_bed.to_csv("hap1_down.bed", sep="\t", header=None, index=False)
+    ov90_up_bed.to_csv("ov90_up.bed", sep="\t", header=None, index=False)
+    ov90_down_bed.to_csv("ov90_down.bed", sep="\t", header=None, index=False)
+
+
+    """bedtools multiinter -i \
+        a549_up.bed a549_down.bed \
+        h2122_up.bed h2122_down.bed \
+        hap1_up.bed hap1_down.bed \
+        ov90_up.bed ov90_down.bed \
+        -names \
+        a549_up a549_down \
+        h2122_up h2122_down \
+        hap1_up hap1_down \
+        ov90_up ov90_down \
+        > cross_cell_type_overlap.bed"""
+
+    overlap = pd.read_csv(os.path.join("cross_cell_type_overlap.bed"), sep="\t", header=None)
+
+    # plot overlap
+    sns.distplot(overlap[3])
+
+    # get peaks with two cell types overlaping
+    o = overlap.loc[overlap[3] == 2]
+
+    # from those, count
+    o['down'] = o[4].str.count("down")
+    o['up'] = o[4].str.count("down")
+
+    o['disagreement'] = (o[4].str.contains("down") & o[4].str.contains("up")).astype(int)
+
+    sns.distplot(o['disagreement'])
+
 
 def enrichment_network():
     # network of enrichment terms
