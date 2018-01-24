@@ -42,6 +42,7 @@ matplotlib.rc('text', usetex=False)
 def main():
     # Start project
     prj = Project(os.path.join("metadata", "project_config.yaml"))
+    prj._samples = [s for s in prj.samples if s.to_use == "1"]
     for sample in prj.samples:
         if sample.library in ["ATAC-seq", "ChIP-seq", "ChIPmentation"]:
             sample.mapped = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.bam")
@@ -51,23 +52,44 @@ def main():
             sample.bitseq_counts = os.path.join(sample.paths.sample_root, "bowtie1_{}".format(sample.transcriptome), "bitSeq", sample.name + ".counts")
 
     # Sample's attributes
-    sample_attributes = ['sample_name', 'cell_line', 'knockout', 'replicate', 'clone']
-    plotting_attributes = ['knockout', 'replicate', 'clone']
+    sample_attributes = ['sample_name', 'cell_line', 'knockout', 'treatment', 'replicate', 'clone', 'batch']
+    plotting_attributes = ['knockout', 'treatment', 'replicate', 'clone', 'batch']
 
     # HAP1 ANALYSIS
     # ATAC-seq
     atacseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["HAP1"])]
     atacseq_samples = [s for s in atacseq_samples if os.path.exists(s.filtered)]  # and s.pass_qc == 1
-    atacseq_samples = [s for s in atacseq_samples if s.knockout != "SMARCC2" and s.clone != "GFP"]
+    # atacseq_samples = [s for s in atacseq_samples if s.knockout != "SMARCC2" and s.clone != "GFP"]
     atac_analysis = ATACSeqAnalysis(name="baf_complex.atacseq", prj=prj, samples=atacseq_samples)
     atac_analysis = main_analysis_pipeline(atac_analysis, data_type="ATAC-seq", cell_type="HAP1")
 
     # RNA-seq
     rnaseq_samples = [s for s in prj.samples if (s.library == "RNA-seq") & (s.cell_line in ["HAP1"])]
     rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]  # and s.pass_qc == 1
-    rnaseq_samples = [s for s in rnaseq_samples if s.knockout != "SMARCC2" and s.clone != "GFP"]
+    # rnaseq_samples = [s for s in rnaseq_samples if s.knockout != "SMARCC2" and s.clone != "GFP"]
     rnaseq_analysis = RNASeqAnalysis(name="baf-complex.rnaseq", prj=prj, samples=rnaseq_samples)
     rnaseq_analysis = main_analysis_pipeline(rnaseq_analysis, data_type="RNA-seq", cell_type="HAP1")
+
+    # export tables
+    res = atac_analysis.differential_results
+    diff = res[(res['padj'] < 0.01) & (res['log2FoldChange'].abs() > 1)]
+    q = atac_analysis.accessibility.loc[diff.index.unique(), :]
+    q.to_csv(os.path.join("results", 'differential_analysis_ATAC-seq',
+                            "differential_accessibility.regions.csv"))
+    q = q.apply(scipy.stats.zscore, axis=1)
+    q.to_csv(os.path.join("results", 'differential_analysis_ATAC-seq',
+                          "differential_accessibility.regions.zscore.csv"))
+    baf_genes = pd.read_csv(os.path.join("metadata", "baf_complex_subunits.csv"), squeeze=True)
+    chrom_list = pd.read_csv(os.path.join("metadata", "Bocklab_chromatin_genes.csv"))
+    for metric in ['padj', 'log2FoldChange']:
+        piv = pd.pivot_table(
+            data=rnaseq_analysis.differential_results.loc[baf_genes].reset_index(),
+            index='index', columns='comparison_name', values=metric)
+        piv.to_csv(os.path.join("results", 'differential_analysis_RNA-seq', "baf_complex_members.differential_expression.{}.csv".format(metric)))
+        piv = pd.pivot_table(
+            data=rnaseq_analysis.differential_results.loc[chrom_list['HGNC_symbol']].reset_index(),
+            index='index', columns='comparison_name', values=metric)
+        piv.to_csv(os.path.join("results", 'differential_analysis_RNA-seq', "chromatin_proteins.differential_expression.{}.csv".format(metric)))
 
 
     # OTHER CELL LINES
@@ -108,13 +130,15 @@ def main():
 
     # read in comparison table
     comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
+    comparison_table = comparison_table[comparison_table['comparison_type'] == 'peaks']
+
     # call peaks
     chipseq_analysis.call_peaks_from_comparisons(
-        comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'], overwrite=False)
+        comparison_table=comparison_table, overwrite=False)
     # summarize peaks
     chipseq_analysis.peak_summary = summarize_peaks_from_comparisons(
         chipseq_analysis,
-        comparison_table=comparison_table[comparison_table['comparison_type'] == 'peaks'])
+        comparison_table=comparison_table)
     chipseq_analysis.peak_summary.to_csv(
         os.path.join(chipseq_analysis.results_dir, chipseq_analysis.name + "_peak_summary.csv"), index=False)
 
@@ -159,11 +183,10 @@ def main():
         (comparison_table['comparison_type'] == 'peaks') &
         (comparison_table['comparison_name'].str.contains("ARID|SMARC|PBRM"))]
     c['comparison_genome'] = 'hg19'
-    get_consensus_sites(
-        chipseq_analysis,
+    chipseq_analysis.get_consensus_sites(
         comparison_table=c,
         region_type="peaks", blacklist_bed="wgEncodeDacMapabilityConsensusExcludable.bed")
-    # chipseq_analysis.calculate_peak_support(comparison_table=c)
+    chipseq_analysis.calculate_peak_support(comparison_table=c)
     chipseq_analysis.measure_coverage()
     chipseq_analysis.normalize()
     chipseq_analysis.annotate(quant_matrix="coverage_qnorm")
@@ -223,7 +246,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         abs_fold_change = 1
     else:
         alpha = 0.05
-        abs_fold_change = 0
+        abs_fold_change = None
 
 
     if data_type == "ATAC-seq":
@@ -266,7 +289,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
 
     if data_type == "RNA-seq":
         # Get gene expression
-        analysis.get_gene_expression(samples=analysis.samples, attributes=["sample_name", "knockout", "replicate", "clone"])
+        analysis.get_gene_expression(samples=analysis.samples, sample_attributes=["sample_name", "knockout", 'treatment', "replicate", "clone", "batch"])
 
         # see expression of knocked-out genes + other complex members
         baf_genes = pd.read_csv(os.path.join("metadata", "baf_complex_subunits.csv"), squeeze=True)
@@ -274,37 +297,54 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             analysis=analysis,
             knockout_genes=baf_genes,
             output_prefix="complex_expression")
+
         quant_matrix = "expression_annotated"
         feature_name = "genes"
-
 
     # Unsupervised analysis
     unsupervised_analysis(
         analysis, quant_matrix=quant_matrix, samples=None,
         attributes_to_plot=plotting_attributes, plot_prefix="all_{}".format(feature_name),
-        plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
-        output_dir="{results_dir}/unsupervised")
+        plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
+        output_dir="{results_dir}/unsupervised.20180123")
+
+    # fix batch effect
+    analysis.matrix_batch_fix = fix_batch_effect(
+        getattr(analysis, quant_matrix), analysis.samples,
+        batch_variable="batch", standardize=True, intermediate_save=True)
+    file = os.path.join(analysis.results_dir, analysis.name + ".{}.annotated_metadata.batch_fix.csv".format(quant_matrix))
+    analysis.matrix_batch_fix.to_csv(file)
+
+    unsupervised_analysis(
+        analysis, quant_matrix="matrix_batch_fix", samples=None,
+        attributes_to_plot=plotting_attributes, plot_prefix="all_{}".format(feature_name),
+        plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
+        output_dir="{results_dir}/unsupervised.batch_fix")
+    quant_matrix="matrix_batch_fix"
+
     # only with certain subunits
     if cell_type == "HAP1":
         to_exclude = ['SMARCA4', "SMARCC1", "ARID1A", "ARID1B", "BCL7B"]
+        # no strong KOs
         unsupervised_analysis(
             analysis, quant_matrix=quant_matrix,
             samples=[s for s in analysis.samples if s.knockout not in to_exclude],
             attributes_to_plot=plotting_attributes, plot_prefix="all_{}_no_strong_knockouts".format(feature_name),
             plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
-            output_dir="{results_dir}/unsupervised")
-
+            output_dir="{results_dir}/unsupervised.batch_fix")
 
     # Supervised analysis
     comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
-    comparison_table = comparison_table[(
-        comparison_table['data_type'] == data_type) &
+    comparison_table = comparison_table[
+        (comparison_table['toggle'] == 1) &
+        (comparison_table['data_type'] == data_type) &
         (comparison_table['cell_type'] == cell_type) &
         (comparison_table['comparison_type'] == 'differential')]
     analysis.differential_results = differential_analysis(
         analysis,
         comparison_table,
         data_type=data_type,
+        samples=[s for s in analysis.samples if s.name in comparison_table['sample_name'].tolist()],
         output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
         covariates=None,
         alpha=0.05,
@@ -323,13 +363,17 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
     plot_differential(
         analysis,
         analysis.differential_results,
+        matrix=getattr(analysis, quant_matrix),
         comparison_table=comparison_table,
         output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+        output_prefix="differential_analysis.batch_fix",
         data_type=data_type,
         alpha=alpha,
         corrected_p_value=True,
         fold_change=abs_fold_change,
-        rasterized=True, robust=True)
+        rasterized=True, robust=True,
+        group_wise_colours=True,
+        group_variables=plotting_attributes)
 
     # repeat without SMARCA4, ARID1A, SMARCC1
     if cell_type == "HAP1":
@@ -361,6 +405,24 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             fold_change=abs_fold_change,
             rasterized=True, robust=True)
 
+    # repeat without SMARCA4, ARID1A, SMARCC1
+    if cell_type == "HAP1":
+        plot_differential(
+            analysis,
+            analysis.differential_results[
+                ~analysis.differential_results['comparison_name'].str.contains("sh|dBet")],
+            matrix=getattr(analysis, quant_matrix),
+            samples=[s for s in analysis.samples if not (("sh" in s.name) or ("dBet" in s.name))],
+            comparison_table=comparison_table[~comparison_table['comparison_name'].str.contains("sh|dBet")],
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            output_prefix="differential_analysis.no_knockdown_dBet",
+            alpha=alpha,
+            corrected_p_value=True,
+            fold_change=abs_fold_change,
+            rasterized=True, robust=True)
+
+
     differential_enrichment(
         analysis,
         analysis.differential_results[
@@ -380,7 +442,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         directional=True,
         data_type=data_type,
         output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
-        permissive=True)
+        permissive=False)
 
     if data_type == "RNA-seq":
         enrichment_table = pd.read_csv(
@@ -409,6 +471,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
                 enrichment_table = pd.read_csv(
                     os.path.join("{}/differential_analysis_{}".format(analysis.results_dir, data_type), "differential_analysis" + ".{}.csv".format(enrichment_type)))
             except pd.errors.EmptyDataError:
+                print("Enrichment dataframe of {} is empty.".format(enrichment_type))
                 continue
 
             plot_differential_enrichment(
@@ -420,6 +483,57 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
                 top_n=5 if enrichment_name != "motif" else 300)
 
     return analysis
+
+
+def fix_batch_effect(
+        matrix, samples,
+        batch_variable="pool_id", standardize=True, intermediate_save=True):
+    """
+    """
+    import pandas as pd
+    from statsmodels.formula.api import ols
+    from statsmodels.stats.anova import anova_lm
+    from statsmodels.graphics.factorplots import interaction_plot
+    import matplotlib.pyplot as plt
+    from scipy import stats
+    from tqdm import tqdm
+
+    m = matrix.loc[:, [s.name for s in samples]]
+    m.index = ['feature'] * len(m.index)
+
+    # standardize variables
+    if standardize:
+        m = m.apply(stats.zscore)
+
+    # get coefficients for batches
+    levels = m.columns.get_level_values(batch_variable).unique()
+    n = len(levels)
+    res = pd.DataFrame(np.zeros((m.shape[0], n)))
+    for i in tqdm(range(m.shape[0]), total=m.shape[0]):
+        data = m.T.iloc[:, i].reset_index()
+
+        formula = 'feature ~ {} - 1'.format(batch_variable)
+        model = ols(formula, data).fit()
+        res.iloc[i] = model.params.values
+
+        if i % 10000 == 0:
+            if intermediate_save:
+                res.iloc[:i, :].to_csv(os.path.join(
+                    "batch.{}.fit.csv".format(batch_variable)), index=False)
+    res.columns = model.params.index
+    res.index = matrix.index
+    res.to_csv(os.path.join(
+        "batch.{}.fit.csv".format(batch_variable)), index=True)
+
+    # fix
+    m.index = matrix.index
+    for batch in levels:
+        s = m.columns[m.columns.get_level_values(batch_variable) == batch]
+        for s_ in s:
+            print(batch, s_)
+            m.loc[:, s_] = m.loc[:, s_] - res.loc[:, res.columns.str.contains(batch)].squeeze()
+
+    return m
 
 
 def diff_atac_heatmap_with_chip(
@@ -437,7 +551,8 @@ def diff_atac_heatmap_with_chip(
     rasterized = True
 
     results = atac_analysis.differential_results
-    results['diff']
+    results = results[~results['comparison_name'].str.contains("sh|dBet")]
+    results['diff'] = (results["padj"] < 0.01) & (results["log2FoldChange"].abs() > 1)
 
     comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
     comparison_table = comparison_table[(
@@ -445,7 +560,8 @@ def diff_atac_heatmap_with_chip(
         (comparison_table['cell_type'] == "HAP1") &
         (comparison_table['comparison_type'] == 'differential')]
 
-    atac_matrix = atac_analysis.accessibility
+    atac_matrix = atac_analysis.accessibility_batch_fix.copy()
+    atac_matrix = atac_matrix.loc[:, ~atac_matrix.columns.get_level_values("sample_name").str.contains("dBet|sh|parental")]
 
     # PLOTS
     comparisons = sorted(results["comparison_name"].drop_duplicates())
@@ -478,15 +594,15 @@ def diff_atac_heatmap_with_chip(
             # Comparison level
             g = sns.clustermap(
                 groups,
-                yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
-                metric="correlation", rasterized=True, figsize=figsize, vmin=0)
+                xticklabels=True, yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
+                metric="correlation", robust=robust, rasterized=rasterized, figsize=figsize)
             g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
             g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.groups.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
 
             g = sns.clustermap(
                 groups,
-                yticklabels=False, z_score=0, cbar_kws={"label": "Z-score of {}\non differential {}".format(quantity, var_name)},
-                metric="correlation", rasterized=True, figsize=figsize)
+                xticklabels=True, yticklabels=False, z_score=0, cbar_kws={"label": "Z-score of {}\non differential {}".format(quantity, var_name)},
+                cmap="RdBu_r", metric="correlation", robust=robust, rasterized=rasterized, figsize=figsize)
             g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
             g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.groups.clustermap.z0.svg".format(var_name)), bbox_inches="tight", dpi=300)
 
@@ -500,14 +616,14 @@ def diff_atac_heatmap_with_chip(
         figsize = (max(5, 0.12 * fold_changes.shape[1]), 5)
 
         g = sns.clustermap(fold_changes.corr(),
-            xticklabels=False, cbar_kws={"label": "Pearson correlation\non fold-changes"},
-            cmap="BuGn", vmin=0, vmax=1, metric="correlation", rasterized=True, figsize=(figsize[0], figsize[0]))
+            xticklabels=False, yticklabels=True, cbar_kws={"label": "Pearson correlation\non fold-changes"},
+            cmap="BuGn", vmin=0, vmax=1, metric="correlation", rasterized=rasterized, figsize=(figsize[0], figsize[0]))
         g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, fontsize="xx-small")
         g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.groups.fold_changes.clustermap.corr.svg".format(var_name)), bbox_inches="tight", dpi=300, metric="correlation")
 
         g = sns.clustermap(fold_changes.loc[all_diff, :],
-            yticklabels=False, cbar_kws={"label": "Fold-change of\ndifferential {}".format(var_name)},
-            robust=True, metric="correlation", rasterized=True, figsize=figsize)
+            xticklabels=True, yticklabels=False, cbar_kws={"label": "Fold-change of\ndifferential {}".format(var_name)},
+            cmap="RdBu_r", robust=True, metric="correlation", rasterized=rasterized, figsize=figsize)
         g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
         g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.groups.fold_changes.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
 
@@ -520,17 +636,16 @@ def diff_atac_heatmap_with_chip(
 
     g = sns.clustermap(
         atac_matrix,
-        yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
-        xticklabels=True,
-        vmin=0, metric="correlation", figsize=figsize, rasterized=rasterized, robust=robust)
+        xticklabels=True, yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
+        cmap="RdBu_r", metric="correlation", figsize=figsize, rasterized=rasterized, robust=robust)
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
     g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
 
     g2 = sns.clustermap(
         atac_matrix,
-        yticklabels=False, z_score=0, cbar_kws={"label": "Z-score of {}\non differential {}".format(quantity, var_name)},
-        xticklabels=True, row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage,
-        metric="correlation", figsize=figsize, rasterized=rasterized, robust=robust)
+        xticklabels=True, yticklabels=False, z_score=0, cbar_kws={"label": "Z-score of {}\non differential {}".format(quantity, var_name)},
+        row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage,
+        cmap="RdBu_r", metric="correlation", figsize=figsize, rasterized=rasterized, robust=robust)
     g2.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
     g2.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.z0.svg".format(var_name)), bbox_inches="tight", dpi=300)
 
@@ -553,31 +668,37 @@ def diff_atac_heatmap_with_chip(
 
     from scipy.stats import zscore
     # chip_z = pd.DataFrame(zscore(c, axis=0), index=regs, columns=chipseq_analysis.accessibility.columns)
+    for label, i in [
+            ("all", "H3|CTCF|Pol|ARID|BRD|PBRM|SMARC"),
+            ("histones", "H3|CTCF|Pol"),
+            ("baf", "ARID|BRD|PBRM|SMARC")
+        ]:
+        c2 = c.loc[:, c.columns.get_level_values(0).str.contains(i)]
 
-    fig, axis = plt.subplots(1, figsize=figsize)
-    sns.heatmap(c, yticklabels=False, ax=axis, vmin=-3, vmax=3, rasterized=rasterized)
-    axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
-    fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.heatmap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+        fig, axis = plt.subplots(1, figsize=figsize)
+        sns.heatmap(c2, xticklabels=True, yticklabels=False, ax=axis, vmin=-3, vmax=3, rasterized=rasterized)
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
+        fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.heatmap.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
-    g3 = sns.clustermap(c, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize)
-    g3.ax_heatmap.set_xticklabels(g3.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
-    g3.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+        g3 = sns.clustermap(c2, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize)
+        g3.ax_heatmap.set_xticklabels(g3.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+        g3.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.clustermap.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
-    c_mean = c.T.groupby('ip').mean().T
-    figsize = (0.12 * c_mean.shape[1], 5)
+        c_mean = c2.T.groupby('ip').mean().T
+        figsize = (0.12 * c_mean.shape[1], 5)
 
-    fig, axis = plt.subplots(1, figsize=figsize)
-    sns.heatmap(c_mean, yticklabels=False, ax=axis, vmin=-3, vmax=3, rasterized=rasterized)
-    axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
-    fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.mean.heatmap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+        fig, axis = plt.subplots(1, figsize=figsize)
+        sns.heatmap(c_mean, xticklabels=True, yticklabels=False, ax=axis, vmin=-3, vmax=3, rasterized=rasterized)
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
+        fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.mean.heatmap.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
-    g4 = sns.clustermap(c_mean, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize)
-    g4.ax_heatmap.set_xticklabels(g4.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
-    g4.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.mean.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+        g4 = sns.clustermap(c_mean, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize)
+        g4.ax_heatmap.set_xticklabels(g4.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+        g4.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.mean.clustermap.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
-    g4 = sns.clustermap(c_mean, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize, cmap="PuOr_r")
-    g4.ax_heatmap.set_xticklabels(g4.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
-    g4.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.mean.clustermap.PuOr_r.svg".format(var_name)), bbox_inches="tight", dpi=300)
+        g4 = sns.clustermap(c_mean, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize, cmap="PuOr_r")
+        g4.ax_heatmap.set_xticklabels(g4.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+        g4.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.mean.clustermap.PuOr_r.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
 
 def pBAF_vs_BAF(chispeq_analysis, output_dir="{results_dir}/pBAF_vs_BAF"):
@@ -2835,6 +2956,149 @@ def chromatin_protein_expression():
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, ha="right", fontsize="xx-small")
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, ha="left", fontsize="xx-small")
     g.savefig(os.path.join("results", "baf-kubicek.chromatin_gene_expression.differential_fc1.svg"), dpi=300, bbox_inches="tight")
+
+
+def discordance_analysis(atac_analysis, chipseq_analysis, rnaseq_analysis):
+    """
+    """
+    def index_to_bed_file(index, bed_file):
+        d = pd.DataFrame(
+            zip(
+                map(lambda x: x[0], index.str.split(":")),
+                map(lambda x: x[1].split("-")[0], index.str.split(":")),
+                map(lambda x: x[1].split("-")[1], index.str.split(":"))))
+        d.to_csv(bed_file, index=False, header=False, sep="\t")
+
+    
+    # Get ChIP-seq data
+    chipseq_analysis.sites = pybedtools.BedTool("results/baf_complex.chipseq.peaks_peak_set.bed")
+    chipseq_analysis.support = pd.read_csv("results/baf_complex.chipseq.peaks_peaks.support.csv", index_col=0, header=range(2))
+
+    # filter to get sites bound by ARID1A/B
+    comparison_table = pd.read_csv(
+        os.path.join("metadata", "comparison_table.csv"))
+    c = comparison_table[
+        (comparison_table['comparison_type'] == 'peaks') &
+        (comparison_table['comparison_name'].str.contains("ARID|SMARC|PBRM"))]
+    chipseq_analysis.calculate_peak_support(comparison_table=c)
+
+    support = chipseq_analysis.support.drop('support', axis=1)
+    support_sum = (
+        support
+        .loc[:, support.columns.get_level_values("comparison").str.contains("ARID1")]
+        .astype(bool).astype(int).sum(axis=1))
+
+    # get sites with at least two peaks called
+    bound_sites = support_sum[support_sum >= 2].index
+    # make bed file
+    index_to_bed_file(
+        bound_sites,
+        os.path.join("results", "ARID1A-ARID1B_bound_sites.bed"))
+
+    # get only relevant comparisons (KOs only)
+    diff = atac_analysis.differential_results
+    diff = diff.loc[~diff['comparison_name'].str.contains("sh|dBet6")]
+    diff = diff.loc[(diff['padj'] < 0.01) & (diff['log2FoldChange'].abs() > 1)]
+
+    # intersect differential ATAC-seq peaks with bound sites
+    index_to_bed_file(
+        diff.index.unique(),
+        os.path.join("results", "differential_sites.bed"))
+
+    diff_bound = (
+        pybedtools.BedTool(os.path.join("results", "differential_sites.bed"))
+        .intersect(b=os.path.join("results", "ARID1A-ARID1B_bound_sites.bed"), wa=True))
+    diff_bound = diff_bound.to_dataframe()
+    diff_bound = diff_bound['chrom'] + ":" + diff_bound['start'].astype(str) + '-' + diff_bound['end'].astype(str)
+
+    diff_unbound = (
+        pybedtools.BedTool(os.path.join("results", "differential_sites.bed"))
+        .intersect(b=os.path.join("results", "ARID1A-ARID1B_bound_sites.bed"), wa=True, v=True))
+    diff_unbound = diff_unbound.to_dataframe()
+    diff_unbound = diff_unbound['chrom'] + ":" + diff_unbound['start'].astype(str) + '-' + diff_unbound['end'].astype(str)
+
+    # compare proportion of discordant changes vs concordant in bound sites vs all differntial for these subunits
+    differential_overlap(
+        diff.loc[diff_bound],
+        total=atac_analysis.accessibility.shape[0],
+        output_dir="{}/differential_analysis_ATAC-seq".format(atac_analysis.results_dir),
+        data_type="ATAC-seq", output_prefix='differential_analysis.only_bound_sites')
+    differential_overlap(
+        diff.loc[diff_unbound],
+        total=len(bound_sites),
+        output_dir="{}/differential_analysis_ATAC-seq".format(atac_analysis.results_dir),
+        data_type="ATAC-seq", output_prefix='differential_analysis.only_unbound_sites')
+
+    differential_overlap(
+        diff,
+        total=len(bound_sites),
+        output_dir="{}/differential_analysis_ATAC-seq".format(atac_analysis.results_dir),
+        data_type="ATAC-seq", output_prefix='differential_analysis.all_sites_sites')
+
+    # plot gene expression fold-change for genes with discordant vs concordant changes between the two subunits
+
+    rnaseq_analysis.differential_results = pd.read_csv(
+        os.path.join(
+            "results", "differential_analysis_RNA-seq",
+            "differential_analysis" + ".deseq_result.all_comparisons.csv"), index_col=0)
+    rna = rnaseq_analysis.differential_results
+    rna = rna.loc[rna['comparison_name'].isin(['ARID1A', "ARID1B"])]
+    # annotate genes with regions
+    g = atac_analysis.gene_annotation
+    rna = rna.join(
+        g['gene_name'].str.split(",")
+        .apply(pd.Series).stack()
+        .reset_index(drop=True, level=1)
+        .reset_index().set_index(0)
+    ).rename(columns={"index": "region"})
+
+
+    d = diff.loc[diff['comparison_name'].isin(['ARID1A', "ARID1B"])]
+    if "direction" not in d.columns:
+        d["direction"] = d["log2FoldChange"].apply(lambda x: "up" if x > 0 else "down")
+    intersections = pd.DataFrame(columns=["group1", "group2", "dir1", "dir2", "size1", "size2", "intersection", "union"])
+    perms = list(itertools.permutations(d.groupby(['comparison_name', 'direction']).groups.items(), 2))
+    res = pd.DataFrame()
+    for ((k1, dir1), i1), ((k2, dir2), i2) in tqdm(perms, total=len(perms)):
+        i1 = set(i1)
+        i2 = set(i2)
+        inter = i1.intersection(i2)
+        union = i1.union(i2)
+
+        k1_inter_mean = rna.loc[
+            (rna['comparison_name'] == k1) &
+            (rna['region'].isin(inter)), "log2FoldChange"].mean()
+        k1_union_mean = rna.loc[
+            (rna['comparison_name'] == k1) &
+            (rna['region'].isin(union)), "log2FoldChange"].mean()
+        k2_inter_mean = rna.loc[
+            (rna['comparison_name'] == k2) &
+            (rna['region'].isin(inter)), "log2FoldChange"].mean()
+        k2_union_mean = rna.loc[
+            (rna['comparison_name'] == k2) &
+            (rna['region'].isin(union)), "log2FoldChange"].mean()
+        res = res.append(
+            pd.Series([k1, dir1, k2, dir2,
+                       k1_inter_mean, k1_union_mean,
+                       k2_inter_mean, k2_union_mean],
+                      index=["k1", "dir1", "k2", "dir2",
+                             "k1_inter_mean", "k1_union_mean",
+                             "k2_inter_mean", "k2_union_mean"]),
+            ignore_index=True)
+    
+    res['label'] = res['k1'] + " " + res['dir1'] + "\n" + res['k2'] + " " + res['dir2']
+    res2 = pd.melt(res.dropna()[['label', 'k1_inter_mean', 'k2_inter_mean']], id_vars=['label'])
+
+    fig, axis = plt.subplots(1, figsize=(1 * 4, 1 * 4))
+    sns.barplot(data=res2, x="label", y="value", hue="variable", ax=axis)
+    sns.despine(fig)
+    fig.savefig(os.path.join("results", "differential_analysis.differential_overlap.bound_sites.disagreement.expression.barplot.svg"), bbox_inches="tight")
+
+
+    # Investigate discordant changes within the same gene for one specific subunit
+    # plot expression fold change for genes depending on the number of discordant/concordant reg.elements for each subunit
+
+
 
 
 if __name__ == '__main__':
