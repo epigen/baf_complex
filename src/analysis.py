@@ -214,6 +214,7 @@ def main():
         output_dir="{results_dir}/unsupervised")
 
 
+    # distinguish between BAF and pBAF specific
     pBAF_vs_BAF(chispeq_analysis)
 
     # # Investigate global changes in accessibility
@@ -246,7 +247,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         abs_fold_change = 1
     else:
         alpha = 0.05
-        abs_fold_change = None
+        abs_fold_change = 0
 
 
     if data_type == "ATAC-seq":
@@ -302,11 +303,25 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         feature_name = "genes"
 
     # Unsupervised analysis
+    red_samples = [s for s in analysis.samples if (
+        ("sh" not in s.name) and
+        ("dBet" not in s.name) and
+        ("BRD4" not in s.name) and
+        ("parental" not in s.name))]
     unsupervised_analysis(
-        analysis, quant_matrix=quant_matrix, samples=None,
-        attributes_to_plot=plotting_attributes, plot_prefix="all_{}".format(feature_name),
-        plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-        output_dir="{results_dir}/unsupervised.20180123")
+        analysis,
+        quant_matrix=quant_matrix,
+        samples=red_samples,
+        attributes_to_plot=plotting_attributes,
+        plot_prefix="all_{}".format(feature_name),
+        plot_max_attr=20,
+        plot_max_pcs=2,
+        plot_group_centroids=True,
+        axis_ticklabels=False,
+        axis_lines=True,
+        always_legend=False,
+        display_corr_values=False,
+        output_dir="{results_dir}/unsupervised.20180131")
 
     # fix batch effect
     analysis.matrix_batch_fix = fix_batch_effect(
@@ -320,7 +335,15 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         attributes_to_plot=plotting_attributes, plot_prefix="all_{}".format(feature_name),
         plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
         output_dir="{results_dir}/unsupervised.batch_fix")
-    quant_matrix="matrix_batch_fix"
+    quant_matrix = "matrix_batch_fix"
+
+    if data_type == "RNA-seq":
+        knockout_plot(
+            analysis=analysis,
+            knockout_genes=baf_genes,
+            expression_matrix=analysis.matrix_batch_fix,
+            output_prefix="complex_expression.batch_fix")
+
 
     # only with certain subunits
     if cell_type == "HAP1":
@@ -330,6 +353,20 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             analysis, quant_matrix=quant_matrix,
             samples=[s for s in analysis.samples if s.knockout not in to_exclude],
             attributes_to_plot=plotting_attributes, plot_prefix="all_{}_no_strong_knockouts".format(feature_name),
+            plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
+            output_dir="{results_dir}/unsupervised.batch_fix")
+
+        unsupervised_analysis(
+            analysis, quant_matrix=quant_matrix,
+            samples=[s for s in analysis.samples if (("BRD4" not in s.name) and ("sh" not in s.name) and ("dBet" not in s.name) and ("parental" not in s.name))],
+            attributes_to_plot=plotting_attributes, plot_prefix="all_{}_no_kd_dBet_BRD4".format(feature_name),
+            plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
+            output_dir="{results_dir}/unsupervised.batch_fix")
+
+        unsupervised_analysis(
+            analysis, quant_matrix=quant_matrix,
+            samples=[s for s in analysis.samples if (("sh" in s.name) or ("dBet" in s.name) or ("parental" in s.name))],
+            attributes_to_plot=plotting_attributes, plot_prefix="all_{}_only_kd_dBet".format(feature_name),
             plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
             output_dir="{results_dir}/unsupervised.batch_fix")
 
@@ -357,21 +394,23 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             analysis.differential_results[
                 (analysis.differential_results['padj'] < alpha) &
                 (analysis.differential_results['log2FoldChange'].abs() > abs_fold_change)],
+            getattr(analysis, quant_matrix).shape[0],
             output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
             data_type=data_type)
 
     plot_differential(
         analysis,
-        analysis.differential_results,
+        analysis.differential_results, # analysis.differential_results[~analysis.differential_results['comparison_name'].str.contains("sh|dBet|BRD4")], 
         matrix=getattr(analysis, quant_matrix),
         comparison_table=comparison_table,
         output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
-        output_prefix="differential_analysis.batch_fix",
+        output_prefix="differential_analysis.batch_fix.top1000",
         data_type=data_type,
         alpha=alpha,
         corrected_p_value=True,
         fold_change=abs_fold_change,
-        rasterized=True, robust=True,
+        rasterized=True,
+        robust=True,
         group_wise_colours=True,
         group_variables=plotting_attributes)
 
@@ -396,6 +435,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             analysis.differential_results[
                 ~analysis.differential_results['comparison_name'].isin(
                     ['SMARCA4', 'ARID1A', 'SMARCC1', "BCL7B", "ARID1B"])],
+            matrix=getattr(analysis, quant_matrix),
             comparison_table=comparison_table,
             data_type=data_type,
             output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
@@ -405,23 +445,47 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             fold_change=abs_fold_change,
             rasterized=True, robust=True)
 
-    # repeat without SMARCA4, ARID1A, SMARCC1
+    # repeat for specific subsets
     if cell_type == "HAP1":
         plot_differential(
             analysis,
             analysis.differential_results[
-                ~analysis.differential_results['comparison_name'].str.contains("sh|dBet")],
+                ~analysis.differential_results['comparison_name'].str.contains("sh|dBet|BRD4")],
             matrix=getattr(analysis, quant_matrix),
-            samples=[s for s in analysis.samples if not (("sh" in s.name) or ("dBet" in s.name))],
-            comparison_table=comparison_table[~comparison_table['comparison_name'].str.contains("sh|dBet")],
+            samples=[s for s in analysis.samples if not (("sh" in s.name) or ("dBet" in s.name) or ("BRD4" in s.name) or ("parental" in s.name))],
+            comparison_table=comparison_table[~comparison_table['comparison_name'].str.contains("sh|dBet|BRD4")],
             data_type=data_type,
             output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
-            output_prefix="differential_analysis.no_knockdown_dBet",
+            output_prefix="differential_analysis.no_knockdown_dBet_BRD4",
             alpha=alpha,
             corrected_p_value=True,
             fold_change=abs_fold_change,
             rasterized=True, robust=True)
 
+        differential_overlap(
+            analysis.differential_results[
+                (~analysis.differential_results['comparison_name'].str.contains("sh|dBet|BRD4")) &
+                (analysis.differential_results['padj'] < alpha) &
+                (analysis.differential_results['log2FoldChange'].abs() > abs_fold_change)],
+            getattr(analysis, quant_matrix).shape[0],
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            output_prefix="differential_analysis.no_knockdown_dBet_BRD4",
+            data_type=data_type)
+
+        plot_differential(
+            analysis,
+            analysis.differential_results[
+                analysis.differential_results['comparison_name'].str.contains("sh|dBet")],
+            matrix=getattr(analysis, quant_matrix),
+            samples=[s for s in analysis.samples if (("sh" in s.name) or ("dBet" in s.name))],
+            comparison_table=comparison_table[comparison_table['comparison_name'].str.contains("sh|dBet")],
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            output_prefix="differential_analysis.only_kd_dBet",
+            alpha=alpha,
+            corrected_p_value=True,
+            fold_change=abs_fold_change,
+            rasterized=True, robust=True)
 
     differential_enrichment(
         analysis,
@@ -435,6 +499,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         max_diff=1000,
         sort_var="pvalue",
         as_jobs=True)
+
     collect_differential_enrichment(
         analysis.differential_results[
             (analysis.differential_results['padj'] < alpha) &
@@ -447,6 +512,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
     if data_type == "RNA-seq":
         enrichment_table = pd.read_csv(
             os.path.join("{}/differential_analysis_{}".format(analysis.results_dir, data_type), "differential_analysis.enrichr.csv"))
+        enrichment_table = enrichment_table[~enrichment_table['comparison_name'].str.contains("sh|dBet|BRD4")]
 
         plot_differential_enrichment(
             enrichment_table,
@@ -457,6 +523,14 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             direction_dependent=True,
             top_n=5)
         plot_differential_enrichment(
+            enrichment_table,
+            "enrichr",
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            output_prefix="differential_analysis.no_knockdown_dBet_BRD4",
+            direction_dependent=True,
+            top_n=5)
+        plot_differential_enrichment(
             enrichment_table[enrichment_table['gene_set_library'].isin(
                 ['WikiPathways_2016'])],
             "enrichr",
@@ -464,7 +538,17 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
             output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
             output_prefix="differential_analysis.top3",
             direction_dependent=True,
-            top_n=3)
+            top_n=10)
+        plot_differential_enrichment(
+            enrichment_table[
+                (~enrichment_table['comparison_name'].str.contains("sh|dBet|BRD4")) &
+                (enrichment_table['gene_set_library'].str.contains("GO_Biological_Process"))],
+            "enrichr",
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            output_prefix="differential_analysis.no_knockdown_dBet_BRD4.only_top",
+            direction_dependent=True,
+            top_n=1)
     elif data_type == "ATAC-seq":
         for enrichment_name, enrichment_type in [('motif', 'meme_ame'), ('lola', 'lola'), ('enrichr', 'enrichr')]:
             try:
@@ -474,11 +558,21 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
                 print("Enrichment dataframe of {} is empty.".format(enrichment_type))
                 continue
 
+            # plot_differential_enrichment(
+            #     enrichment_table,
+            #     enrichment_name,
+            #     data_type=data_type,
+            #     output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+            #     direction_dependent=True,
+            #     top_n=5 if enrichment_name != "motif" else 300)
+
+
             plot_differential_enrichment(
-                enrichment_table,
+                enrichment_table[~enrichment_table['comparison_name'].str.contains("sh|dBet|BRD4")],
                 enrichment_name,
                 data_type=data_type,
                 output_dir="{}/differential_analysis_{}".format(analysis.results_dir, data_type),
+                output_prefix="differential_analysis.no_knockdown_dBet_BRD4",
                 direction_dependent=True,
                 top_n=5 if enrichment_name != "motif" else 300)
 
@@ -492,7 +586,6 @@ def fix_batch_effect(
     """
     import pandas as pd
     from statsmodels.formula.api import ols
-    from statsmodels.stats.anova import anova_lm
     from statsmodels.graphics.factorplots import interaction_plot
     import matplotlib.pyplot as plt
     from scipy import stats
@@ -551,7 +644,7 @@ def diff_atac_heatmap_with_chip(
     rasterized = True
 
     results = atac_analysis.differential_results
-    results = results[~results['comparison_name'].str.contains("sh|dBet")]
+    results = results[~results['comparison_name'].str.contains("sh|dBet|parental|BRD4")]
     results['diff'] = (results["padj"] < 0.01) & (results["log2FoldChange"].abs() > 1)
 
     comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
@@ -561,7 +654,7 @@ def diff_atac_heatmap_with_chip(
         (comparison_table['comparison_type'] == 'differential')]
 
     atac_matrix = atac_analysis.accessibility_batch_fix.copy()
-    atac_matrix = atac_matrix.loc[:, ~atac_matrix.columns.get_level_values("sample_name").str.contains("dBet|sh|parental")]
+    atac_matrix = atac_matrix.loc[:, ~atac_matrix.columns.get_level_values("sample_name").str.contains("dBet|sh|parental|BRD4")]
 
     # PLOTS
     comparisons = sorted(results["comparison_name"].drop_duplicates())
@@ -634,12 +727,17 @@ def diff_atac_heatmap_with_chip(
     atac_matrix = atac_matrix.loc[all_diff, :]
     figsize = (max(5, 0.12 * atac_matrix.shape[1]), 5)
 
+    col = sns.clustermap(
+        atac_matrix,
+        xticklabels=False, yticklabels=False, metric="correlation", figsize=(1, 1), rasterized=True, robust=robust)
+
     g = sns.clustermap(
         atac_matrix,
+        col_linkage=col.dendrogram_col.linkage,
         xticklabels=True, yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
-        cmap="RdBu_r", metric="correlation", figsize=figsize, rasterized=rasterized, robust=robust)
+        cmap="RdBu_r", metric="euclidean", figsize=figsize, rasterized=rasterized, robust=robust)
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
-    g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.svg".format(var_name)), bbox_inches="tight", dpi=300)
+    g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.new.euclidean.svg".format(var_name)), bbox_inches="tight", dpi=100)
 
     g2 = sns.clustermap(
         atac_matrix,
@@ -671,7 +769,7 @@ def diff_atac_heatmap_with_chip(
     for label, i in [
             ("all", "H3|CTCF|Pol|ARID|BRD|PBRM|SMARC"),
             ("histones", "H3|CTCF|Pol"),
-            ("baf", "ARID|BRD|PBRM|SMARC")
+            ("baf", "ARID|PBRM|SMARC")
         ]:
         c2 = c.loc[:, c.columns.get_level_values(0).str.contains(i)]
 
@@ -753,8 +851,7 @@ def pBAF_vs_BAF(chispeq_analysis, output_dir="{results_dir}/pBAF_vs_BAF"):
             ((stats['norm_fold_change'] < -1.5))) &
         (stats['density'] < np.percentile(stats['density'].dropna(), 5))
     ]
-    diff['direction'] = (diff['norm_fold_change'] >=
-                          0).astype(int).replace(0, -1)
+    diff['direction'] = (diff['norm_fold_change'] >= 0).astype(int).replace(0, -1)
     # for ip in chip_mean.columns:
     #     stats = stats.join(np.log2(chip_mean[ip] / background_mean).to_frame(name=ip))
     diff.sort_values(['direction', 'norm_fold_change'], ascending=False).to_csv(
@@ -859,7 +956,7 @@ def pBAF_vs_BAF(chispeq_analysis, output_dir="{results_dir}/pBAF_vs_BAF"):
 
         # Get fold-change compared to control
         m = (
-            atac_analysis.differential_results
+            atac_analysis.differential_results[~atac_analysis.differential_results['comparison_name'].str.contains("sh|parental|dBet")]
             .loc[j, ["log2FoldChange", "comparison_name"]]
             .rename(columns={"comparison_name": "knockout", "log2FoldChange": "value"}))
         m['direction'] = label
@@ -878,7 +975,7 @@ def pBAF_vs_BAF(chispeq_analysis, output_dir="{results_dir}/pBAF_vs_BAF"):
 
         # Get fold-change compared to control
         m = (
-            rnaseq_analysis.differential_results
+            rnaseq_analysis.differential_results[~rnaseq_analysis.differential_results['comparison_name'].str.contains("sh|parental|dBet")]
             .loc[g, ["log2FoldChange", "comparison_name"]]
             .rename(columns={"comparison_name": "knockout", "log2FoldChange": "value"}))
         m['direction'] = label
@@ -890,22 +987,31 @@ def pBAF_vs_BAF(chispeq_analysis, output_dir="{results_dir}/pBAF_vs_BAF"):
                             ".baf_peaks.pBAF_vs_BAF.differential.enrichments.csv"), index=False)
 
     fig, axis = plt.subplots(2, 2, figsize=(4 * 4, 2 * 4))
+    axis[0, 0].set_title("Accessibility")
+    axis[0, 1].set_title("Expression")
     sns.barplot(data=enrichment[
         (enrichment['data_type'] == "accesibility") &
         (enrichment['value_type'] == "absolute")
-    ], x="direction", y="value", hue="knockout", ax=axis[0, 0])
+    ], x="knockout", y="value", hue="direction", ax=axis[0, 0])
     sns.barplot(data=enrichment[
         (enrichment['data_type'] == "accesibility") &
         (enrichment['value_type'] == "fold_change")
-    ], x="direction", y="value", hue="knockout", ax=axis[1, 0])
+    ], x="knockout", y="value", hue="direction", ax=axis[1, 0])
     sns.barplot(data=enrichment[
         (enrichment['data_type'] == "expression") &
         (enrichment['value_type'] == "absolute")
-    ], x="direction", y="value", hue="knockout", ax=axis[0, 1])
+    ], x="knockout", y="value", hue="direction", ax=axis[0, 1])
     sns.barplot(data=enrichment[
         (enrichment['data_type'] == "expression") &
         (enrichment['value_type'] == "fold_change")
-    ], x="direction", y="value", hue="knockout", ax=axis[1, 1])
+    ], x="knockout", y="value", hue="direction", ax=axis[1, 1])
+    axis[0, 0].set_ylabel("Accessiblity")
+    axis[1, 0].set_ylabel("Log2 fold-change")
+    axis[0, 1].set_ylabel("Expression")
+    axis[1, 1].set_ylabel("Log2 fold-change")
+    for ax in axis.flatten():
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
+    sns.despine(fig)
     fig.savefig(os.path.join(output_dir, chipseq_analysis.name +
                             ".baf_peaks.pBAF_vs_BAF.differential.all_enrichments.<10kb.barplot.svg"), bbox_inches="tight", dpi=300)
 
@@ -1297,10 +1403,13 @@ def enrichment_network():
 
 
 def accessibility_expression(
-        self,
+        atac_analysis,
+        rnaseq_analysis,
         acce_dir="deseq_knockout",
         expr_dir="deseq_expression_knockout",
-        trait="knockout"
+        trait="knockout",
+        output_dir="results/cross_datatype_comparison",
+        output_prefix="cross_datatype_comparison"
 ):
     """
     """
@@ -1321,57 +1430,77 @@ def accessibility_expression(
         else:
             return np.mean(x)
 
-    # read in accessibility
-    acce = pd.read_csv(os.path.join("results", acce_dir, acce_dir) + ".%s.annotated.csv" % trait)
-    acce['comparison'] = acce['comparison'].str.replace("-WT", "")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    # split accessiblity by gene (shared regulatory elements will count twice)
-    acce_split = pd.DataFrame([pd.Series([row['log2FoldChange'], row['comparison'], g])
-                                for _, row in acce.iterrows() for g in row['gene_name'].split(',')])
-    acce_split.columns = ['log2FoldChange', 'comparison', 'gene_name']
-    acce_split.to_csv(os.path.join("results", "accessibility.fold_changes.long_format.gene_split.csv"), index=False)
+    # Accessibility fold-changes
+    acce = atac_analysis.differential_results
 
-    # pivot tables
-    acce_fc = pd.pivot_table(data=acce_split, values="log2FoldChange", index="gene_name", columns="comparison", aggfunc=signed_max)
+    # annotate reg. elements with genes
+    g = atac_analysis.gene_annotation
+    acce = acce.join(
+        g['gene_name'].str.split(",")
+        .apply(pd.Series).stack()
+        .reset_index(drop=True, level=1)
+        .reset_index().set_index("index")
+    ).rename(columns={0: "gene_name"})
+    # get signed max for each gene and comparison
+    acce_fc = pd.pivot_table(data=acce, values="log2FoldChange", index="gene_name", columns="comparison_name", aggfunc=signed_max)
+    acce_fc.to_csv(os.path.join(output_dir, "accessibility.fold_changes.signed_max.per_gene.csv"), index=True)
+    # acce_fc = pd.read_csv(os.path.join(output_dir, "accessibility.fold_changes.signed_max.per_gene.csv"), index_col=0)
 
-    expr = pd.read_csv(os.path.join("results", expr_dir, expr_dir) + ".%s.annotated.csv" % trait)
-    expr_fc = pd.pivot_table(data=expr, values="log2FoldChange", index="gene_name", columns="comparison", aggfunc=np.mean)
-
-    # save
-    acce_fc.to_csv(os.path.join("results", "accessibility.fold_changes.pivot.gene_split.signed_max.csv"), index=True)
-    expr_fc.to_csv(os.path.join("results", "expression.fold_changes.pivot.signed_max.csv"), index=True)
-
-    # read
-    acce_fc = pd.read_csv(os.path.join("results", "accessibility.fold_changes.pivot.gene_split.signed_max.csv"))
-    expr_fc = pd.read_csv(os.path.join("results", "expression.fold_changes.pivot.signed_max.csv"))
+    # Expression fold-changes
+    expr = rnaseq_analysis.differential_results
+    expr.index.name = "gene_name"
+    expr_fc = pd.pivot_table(data=expr.reset_index(), values="log2FoldChange", index="gene_name", columns="comparison_name", aggfunc=np.mean)
+    expr_fc.to_csv(os.path.join(output_dir, "expression.fold_changes.signed_max.per_gene.csv"), index=True)
+    # expr_fc = pd.read_csv(os.path.join(output_dir, "expression.fold_changes.signed_max.per_gene.csv"), index_col=0)
 
     # match indexes (genes quantified)
-    expr_fc = expr_fc.ix[acce_fc.index].dropna().drop(["SMARCC2"], axis=1)
-    acce_fc = acce_fc.ix[expr_fc.index].dropna().drop(["SMARCC2", "WT_GFP"], axis=1)
+    expr_fc = expr_fc.ix[acce_fc.index].dropna()
+    acce_fc = acce_fc.ix[expr_fc.index].dropna()
 
     # Plot correlation of fold_changes
-    joint = expr_fc.set_index("gene_name").join(acce_fc.set_index("gene_name"), lsuffix="_RNA", rsuffix="_ATAC")
+    joint = expr_fc.join(acce_fc, lsuffix="_RNA-seq", rsuffix="_ATAC-seq")
     c = joint.corr()
 
     # all vs all
-    g = sns.clustermap(c, robust=True, col_cluster=False, row_cluster=False)
+    g = sns.clustermap(
+        c,
+        xticklabels=True, yticklabels=True,
+        robust=True, col_cluster=False, row_cluster=False, cbar_kws={"label": "Pearson correlation"})
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join("results", "accessibility-expression.fold_change.signed_max.correlation.all.ordered.svg"))
-    g = sns.clustermap(c, robust=True, col_cluster=True, row_cluster=True)
+    g.savefig(os.path.join(output_dir, output_prefix + ".fold_change.signed_max.correlation.all.ordered.svg"))
+
+    g = sns.clustermap(
+        c,
+        xticklabels=True, yticklabels=True,
+        robust=True, col_cluster=True, row_cluster=True, cbar_kws={"label": "Pearson correlation"})
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join("results", "accessibility-expression.fold_change.signed_max.correlation.all.clustered.svg"))
+    g.savefig(os.path.join(output_dir, output_prefix + ".fold_change.signed_max.correlation.all.clustered.svg"))
 
     # one vs other
-    g = sns.clustermap(c.loc[c.index.str.contains("ATAC"), c.columns.str.contains("RNA")].sort_index(0).sort_index(1), col_cluster=False, row_cluster=False, robust=False)
+    q = c.loc[
+            c.index.str.contains("RNA-seq"),
+            c.columns.str.contains("ATAC-seq")].sort_index(0).sort_index(1)
+    v = q.abs().values.flatten().max()
+    v += (v / 5.)
+    g = sns.clustermap(
+        q,
+        xticklabels=True, yticklabels=True,
+        cmap="RdBu_r", vmin=-v, vmax=v, col_cluster=False, row_cluster=False, robust=False, cbar_kws={"label": "Pearson correlation"})
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join("results", "accessibility-expression.fold_change.signed_max.correlation.ove-vs-other.ordered.svg"))
-    g = sns.clustermap(c.loc[c.index.str.contains("ATAC"), c.columns.str.contains("RNA")].sort_index(0).sort_index(1), col_cluster=True, row_cluster=True, robust=False)
+    g.savefig(os.path.join(output_dir, output_prefix + ".fold_change.signed_max.correlation.cross-data_types.ordered.svg"))
+    g = sns.clustermap(
+        q,
+        xticklabels=True, yticklabels=True,
+        cmap="RdBu_r", vmin=-v, vmax=v, col_cluster=True, row_cluster=True, robust=False, cbar_kws={"label": "Pearson correlation"})
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join("results", "accessibility-expression.fold_change.signed_max.correlation.ove-vs-other.clustered.svg"))
+    g.savefig(os.path.join(output_dir, output_prefix + ".fold_change.signed_max.correlation.cross-data_types.clustered.svg"))
 
 
     # Plot fold-changes in accessibility vs expression
@@ -1408,81 +1537,8 @@ def accessibility_expression(
 
     axis[2, 0].set_ylabel("log2 fold-change (ATAC-seq)")
     axis[4, 2].set_xlabel("log2 fold-change (RNA-seq)")
-    fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.99_perc.no_lowess_color.svg"), bbox_inches="tight", dpi=300)
-    fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.99_perc.png"), bbox_inches="tight", dpi=300)
-
-    # Plot per percentiles
-    # all genes
-    n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
-    fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
-    dists = pd.DataFrame()
-    means = pd.DataFrame()
-    for i, ko in enumerate(acce_fc.columns):
-        print(ko)
-        last_p = 0
-        for j, p in enumerate(np.arange(0, 101, 1)):
-            if p == 0:
-                continue
-            b = acce_fc[ko]
-            sel_genes = b[(b > np.percentile(b, last_p)) & (b < np.percentile(b, p))].index
-            a = expr_fc.loc[sel_genes, ko].to_frame()
-            a.columns = ["gene"]
-            a["knockout"] = ko
-            a["percentile"] = p
-            dists = dists.append(a)
-            means = means.append(pd.Series([a['gene'].mean(), ko, p], index=["mean", "knockout", "percentile"]), ignore_index=True)
-            last_p = p
-
-    g = sns.FacetGrid(data=dists, col="knockout", col_wrap=4)
-    g.map(sns.violinplot, data=dists, x="percentile", y="gene")
-
-    g = sns.FacetGrid(data=means, col="knockout", col_wrap=4)
-    g.map(plt.scatter, data=means, x="percentile", y="mean", alpha=0.2)
-
-    # Plot per percentiles - same values for every knockout
-    # significant in both
-    percentils = np.concatenate([np.logspace(-2, np.log10(50), 50, base=10), (100 - np.logspace(-2, np.log10(50), 50, base=10))[::-1]])
-    percentil_values = pd.Series({p: np.percentile(expr_fc, p) for p in percentils})
-
-    dists = pd.DataFrame()
-    means = pd.DataFrame()
-    for i, ko in enumerate(acce_fc.columns):
-        print(ko)
-
-        # get values
-        a = expr_fc[ko]
-        b = acce_fc[ko]
-        sig = expr_fc[(abs(a) > 1) & (abs(b) > 1)].index
-
-        last_v = 0
-        for p, v in enumerate(percentil_values):
-            # if p == 0:
-            #     continue
-            # b = b[sig]
-            sel_genes = b[(b > last_v) & (b < v)].index
-            means = means.append(pd.Series([expr_fc.loc[sel_genes, ko].mean(), ko, p], index=["mean", "knockout", "percentile"]), ignore_index=True)
-            # a = expr_fc.loc[sel_genes, ko].to_frame()
-            # a.columns = ["gene"]
-            # a["knockout"] = ko
-            # a["percentile"] = p
-            # dists = dists.append(a)
-            last_v = v
-
-    n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
-    fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
-    for i, ko in enumerate(acce_fc.columns):
-        axis.flat[i].scatter(means.loc[means['knockout'] == ko, "percentile"], means.loc[means['knockout'] == ko, "mean"])
-        axis.flat[i].set_title(ko)
-
-    fig, axis = plt.subplots(1, figsize=(8, 6))
-    sns.violinplot(data=dists.groupby(['knockout', 'percentile']).mean().reset_index(), x="percentile", y="gene", ax=axis)
-    fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.all_percentiles.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
-
-    g = sns.FacetGrid(data=dists, col="knockout", col_wrap=4)
-    g.map(sns.violinplot, data=dists, x="percentile", y="gene", col="knockout")
-
-    g = sns.FacetGrid(data=means, col="knockout", col_wrap=4)
-    g.map(plt.scatter, data=means, x="percentile", y="mean", alpha=0.2)
+    fig.savefig(os.path.join(output_dir, output_prefix + ".fold_changes.signed_max.99_perc.no_lowess_color.svg"), bbox_inches="tight", dpi=300)
+    fig.savefig(os.path.join(output_dir, output_prefix + ".fold_changes.signed_max.99_perc.png"), bbox_inches="tight", dpi=300)
 
     # By fixed bins of fold-change
     step = 0.25
@@ -1494,11 +1550,13 @@ def accessibility_expression(
     dists = pd.DataFrame()
     means = pd.DataFrame()
     for i, ko in enumerate(acce_fc.columns):
-        print(ko)
-
         # get values
-        a = abs(expr_fc[ko])
-        b = abs(acce_fc[ko])
+        try:
+            a = abs(expr_fc[ko])
+            b = abs(acce_fc[ko])
+        except KeyError:
+            continue
+        print(ko)
         for j, (l1, l2) in enumerate(bins):
             sel_genes = b[(b > l1) & (b < l2)].index
             means = means.append(pd.Series([a[sel_genes].dropna().mean(), ko, l1, l2], index=["mean", "knockout", "min", "max"]), ignore_index=True)
@@ -1514,7 +1572,7 @@ def accessibility_expression(
     axis.scatter(means2.loc[:, "min"], means2.loc[:, "mean"])
     axis.set_ylabel("abs log2 fold-change (RNA-seq)")
     axis.set_xlabel("abs log2 fold-change (ATAC-seq)")
-    fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.absolute.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
+    fig.savefig(os.path.join(output_dir, output_prefix + ".fold_changes.signed_max.absolute.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
 
     means2 = dists.groupby(['max', 'min'])['change'].mean().reset_index()
     fig, axis = plt.subplots(1, 1, figsize=(4 * 1, 4 * 1))
@@ -1522,47 +1580,29 @@ def accessibility_expression(
     axis.axhline(0, alpha=0.2, color="black", linestyle="--")
     axis.set_ylabel("abs log2 fold-change (RNA-seq)")
     axis.set_xlabel("abs log2 fold-change (ATAC-seq)")
-    fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.absolute.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
+    fig.savefig(os.path.join(output_dir, output_prefix + ".fold_changes.signed_max.absolute.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
 
     dists2 = dists[dists['min'] <= 3.0]
     fig, axis = plt.subplots(1, 1, figsize=(4 * 1, 4 * 1))
     sns.violinplot(dists2.loc[:, "min"], dists2.loc[:, "change"], trim=True, cut=0, ax=axis)
     axis.set_ylabel("abs log2 fold-change (RNA-seq)")
     axis.set_xlabel("abs log2 fold-change (ATAC-seq)")
-    fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.absolute.cross_knockouts.violinplot.svg"), bbox_inches="tight", dpi=300)
+    fig.savefig(os.path.join(output_dir, output_prefix + ".fold_changes.signed_max.absolute.cross_knockouts.violinplot.svg"), bbox_inches="tight", dpi=300)
 
     dists2 = dists[dists['min'] <= 3.0]
     dists2 = dists2.groupby(['knockout', 'min', 'max']).mean().reset_index()
     n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
     fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
     for i, ko in enumerate(acce_fc.columns):
-        axis.flat[i].scatter(dists2.loc[dists2['knockout'] == ko, "min"], dists2.loc[dists2['knockout'] == ko, "change"])
+        try:
+            axis.flat[i].scatter(dists2.loc[dists2['knockout'] == ko, "min"], dists2.loc[dists2['knockout'] == ko, "change"])
+        except IndexError:
+            continue
         axis.flat[i].set_title(ko)
-    fig.savefig(os.path.join("results", "accessibility-expression.fold_changes.signed_max.absolute.each_knockout.svg"), bbox_inches="tight", dpi=300)
-
-    # n_rows = n_cols = int(np.ceil(np.sqrt(expr_fc.shape[1])))
-    # fig, axis = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(2 * n_rows, 2 * n_cols))
-    # for i, ko in enumerate(acce_fc.columns):
-    #     axis.flat[i].scatter(means.loc[means['knockout'] == ko, "min"], means.loc[means['knockout'] == ko, "mean"])
-    #     axis.flat[i].axhline(0, alpha=0.2, color="black", linestyle="--")
-    #     # axis.flat[i].set_xticklabels([x[0] for x in bins])
-    #     axis.flat[i].set_title(ko)
-
-    # # Check if genes with high agreement and increase are just already more expressed or accessible to begin with
-    # g_up = sig[(pd.DataFrame([a.ix[sig], b.ix[sig]]).T > 0).all(1)]
-    # g_down = sig[(pd.DataFrame([a.ix[sig], b.ix[sig]]).T < 0).all(1)]
-    # self.expression.ix[g_up]
-    # self.expression.ix[g_down]
-    # self.accessibility.ix[sig]
-    # self.expression.ix[sig]
-
-    # # Check if genes with increasing expression but no increasing accessibility are already more accessible to begin with
-
-    # # Using the native many-to-one relationships for ATAC-seq
+    fig.savefig(os.path.join(output_dir, output_prefix + ".fold_changes.signed_max.absolute.each_knockout.svg"), bbox_inches="tight", dpi=300)
 
 
-
-    # Correlate gene-level enrichements from ATAC-seq and RNA-seq
+    # Correlate gene-level enrichments from ATAC-seq and RNA-seq
     atac_enrichment_table = pd.read_csv(
         os.path.join("{}/differential_analysis_{}".format(atac_analysis.results_dir, "ATAC-seq"), "differential_analysis.enrichr.csv"))
     rnaseq_enrichment_table = pd.read_csv(
@@ -1590,7 +1630,7 @@ def accessibility_expression(
 
                 for term in joint.mean(1).sort_values().tail(top_n).index:
                     axis[i, j].text(x=joint.loc[term, 'ATAC-seq'], y=joint.loc[term, 'RNA-seq'], s=term)
-        fig.savefig(os.path.join("results", "accessibility-expression.enrichments.{}.scatter+text.svg".format(gene_set_library)), bbox_inches="tight", dpi=300)
+        fig.savefig(os.path.join(output_dir, output_prefix + ".enrichments.{}.scatter+text.svg".format(gene_set_library)), bbox_inches="tight", dpi=300)
 
     # Now directions combined
     for gene_set_library in atac_enrichment_table['gene_set_library'].unique():
@@ -1626,7 +1666,7 @@ def accessibility_expression(
 
                 for term in joint.mean(1).sort_values().tail(top_n).index:
                     axis[i, j].text(x=joint.loc[term, 'ATAC-seq'], y=joint.loc[term, 'RNA-seq'], s=term)
-        fig.savefig(os.path.join("results", "accessibility-expression.enrichments.{}.scatter+text.svg".format(gene_set_library)), bbox_inches="tight", dpi=300)
+        fig.savefig(os.path.join(output_dir, output_prefix + ".enrichments.{}.scatter+text.svg".format(gene_set_library)), bbox_inches="tight", dpi=300)
 
 
 
@@ -1674,13 +1714,13 @@ def accessibility_expression(
     g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join("results", "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature&WikiPathways.clustermap.svg"), bbox_inches="tight", dpi=300)
+    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature&WikiPathways.clustermap.svg"), bbox_inches="tight", dpi=300)
 
 
     g = sns.clustermap(rnaseq_analysis.expression_annotated.loc[cc_genes, :].dropna().T.groupby("knockout").mean().T, z_score=0, rasterized=True, square=True)
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join("results", "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature.group.clustermap.svg"), bbox_inches="tight", dpi=300)
+    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature.group.clustermap.svg"), bbox_inches="tight", dpi=300)
 
 
 
@@ -1700,7 +1740,7 @@ def accessibility_expression(
     g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join("results", "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
+    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
 
     # investigate genes in second cluster (ARID2-specific)
     clusters = scipy.cluster.hierarchy.fcluster(g.dendrogram_row.linkage, t=2, criterion='maxclust')
@@ -1710,14 +1750,14 @@ def accessibility_expression(
         row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage, row_colors=plt.get_cmap("Paired")(clusters))
     g2.ax_heatmap.set_xticklabels(g2.ax_heatmap.get_xticklabels(), rotation=90)
     g2.ax_heatmap.set_yticklabels(g2.ax_heatmap.get_yticklabels(), rotation=0)
-    g2.savefig(os.path.join("results", "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.clusters_labeled.svg"), bbox_inches="tight", dpi=300)
+    g2.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.clusters_labeled.svg"), bbox_inches="tight", dpi=300)
 
     pbaf_genes = pd.Series(g.data.index).iloc[clusters == pd.Series(clusters).value_counts().argmin()].sort_values()
 
     g3 = sns.clustermap(rnaseq_analysis.expression.loc[pbaf_genes, :], z_score=0, rasterized=True, metric="correlation")
     g3.ax_heatmap.set_xticklabels(g3.ax_heatmap.get_xticklabels(), rotation=90)
     g3.ax_heatmap.set_yticklabels(g3.ax_heatmap.get_yticklabels(), rotation=0)
-    g3.savefig(os.path.join("results", "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.pbaf_genes.svg"), bbox_inches="tight", dpi=300)
+    g3.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.pbaf_genes.svg"), bbox_inches="tight", dpi=300)
 
 
     # Cell cycle signature
@@ -1738,7 +1778,7 @@ def accessibility_expression(
     axis[1].set_xlabel("Cell cycle signature (Rank)")
     axis[1].set_ylabel("Cell cycle signature (Z-score)")
     sns.despine(fig)
-    fig.savefig(os.path.join("results", "ARID2_SMARCA4_interaction.cell_cycle_signature.mean_zscore.rank_vs_zscore.svg"), bbox_inches="tight")
+    fig.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.mean_zscore.rank_vs_zscore.svg"), bbox_inches="tight")
 
 
     # Classic cell cycle signature
@@ -1748,7 +1788,7 @@ def accessibility_expression(
     g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
     g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join("results", "ARID2_SMARCA4_interaction.cell_cycle_regev_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
+    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_regev_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
 
 
 def transcription_factor_accessibility():

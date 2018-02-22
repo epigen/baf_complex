@@ -21,10 +21,13 @@ def merge_bams(bams, output_bam):
     """
     Decorator for some methods of Analysis class.
     """
-    job_file = os.path.join(os.path.dirname(output_bam), os.path.basename(output_bam).split(".")[0] + ".sh")
-    log_file = os.path.join(os.path.dirname(output_bam), os.path.basename(output_bam).split(".")[0] + ".log")
+    job_name = "merge_bams_{}".format(os.path.basename(output_bam).split(".")[0])
+    job_file = os.path.join(os.path.dirname(output_bam), job_name + ".sh")
+    log_file = os.path.join(os.path.dirname(output_bam), job_name + ".log")
 
-    cmd = tk.slurm_header("merge_bams", log_file, cpus_per_task=8, time='10:00:00', queue="shortq", mem_per_cpu=8000)
+    cmd = tk.slurm_header(
+        job_name, log_file,
+        cpus_per_task=8, time='10:00:00', queue="shortq", mem_per_cpu=8000)
 
     cmd += """
 \t\tsamtools merge {0} {1}
@@ -40,55 +43,49 @@ def merge_bams(bams, output_bam):
     tk.slurm_submit_job(job_file)
 
 
-def bamToBigWig(inputBam, outputBigWig, tagmented=False, normalize=True):
+def bamToBigWig(input_bam, output_bigwig, tagmented=False, normalize=True):
     import os
     import re
 
-    genomeSizes = "/data/groups/lab_bock/shared/resources/genomes/hg19/hg19.chromSizes"
+    job_name = "bam_to_bigwig_{}".format(os.path.basename(output_bigwig).split(".")[0])
+    job_file = os.path.join(os.path.dirname(output_bigwig), job_name + ".sh")
+    log_file = os.path.join(os.path.dirname(output_bigwig), job_name + ".log")
+
+    genome_sizes = "/data/groups/lab_bock/shared/resources/genomes/hg19/hg19.chromSizes"
     genome = "hg19"
 
-    cmd = tk.slurm_header("bam_to_bigwig", os.path.join("/scratch/users/arendeiro/", "merge_bams.slurm.log"), cpus_per_task=8, time='6-10:00:00', queue="longq", mem_per_cpu=8000)
+    cmd = tk.slurm_header(
+        job_name, log_file,
+        cpus_per_task=8, time='6-10:00:00', queue="longq", mem_per_cpu=8000)
 
-    transientFile = os.path.abspath(re.sub("\.bigWig", "", outputBigWig))
+    transient_file = os.path.abspath(re.sub("\.bigWig", "", output_bigwig))
 
-    cmd1 = """
-    bedtools bamtobed -i {0} |""".format(inputBam)
+    cmd1 = """\t\tbedtools bamtobed -i {0} |""".format(input_bam)
     if not tagmented:
-        cmd1 += " bedtools slop -i stdin -g {0} -s -l 0 -r 130 |".format(genomeSizes)
+        cmd1 += " bedtools slop -i stdin -g {0} -s -l 0 -r 130 |".format(genome_sizes)
         cmd1 += " fix_bedfile_genome_boundaries.py {0} |".format(genome)
     cmd1 += " genomeCoverageBed {0}-bg -g {1} -i stdin > {2}.cov".format(
             "-5 " if tagmented else "",
-            genomeSizes,
-            transientFile
+            genome_sizes,
+            transient_file
     )
     cmd += cmd1
 
     if normalize:
-        cmd += """
-    awk 'NR==FNR{{sum+= $4; next}}{{ $4 = ($4 / sum) * 1000000; print}}' {0}.cov {0}.cov > {0}.normalized.cov
-    """.format(transientFile)
+        cmd += """\n\t\tawk 'NR==FNR{{sum+= $4; next}}{{ $4 = ($4 / sum) * 1000000; print}}' {0}.cov {0}.cov > {0}.normalized.cov""".format(transient_file)
 
-    cmd += """
-    bedGraphToBigWig {0}{1}.cov {2} {3}
-    """.format(transientFile, ".normalized" if normalize else "", genomeSizes, outputBigWig)
+    cmd += """\n\t\tbedGraphToBigWig {0}{1}.cov {2} {3}""".format(transient_file, ".normalized" if normalize else "", genome_sizes, output_bigwig)
 
     # remove tmp files
-    cmd += """
-    if [[ -s {0}.cov ]]; then rm {0}.cov; fi
-    """.format(transientFile)
+    cmd += """\n\t\tif [[ -s {0}.cov ]]; then rm {0}.cov; fi""".format(transient_file)
     if normalize:
-        cmd += """
-    if [[ -s {0}.normalized.cov ]]; then rm {0}.normalized.cov; fi
-    """.format(transientFile)
+        cmd += """\n\t\tif [[ -s {0}.normalized.cov ]]; then rm {0}.normalized.cov; fi""".format(transient_file)
 
-    cmd += """
-    chmod 755 {0}
-    """.format(outputBigWig)
+    cmd += """\n\t\tchmod 755 {0}""".format(output_bigwig)
 
     cmd += tk.slurm_footer()
 
     # write job to file
-    job_file = "/scratch/users/arendeiro/tmp.sh"
     with open(job_file, 'w') as handle:
         handle.writelines(textwrap.dedent(cmd))
 
@@ -154,14 +151,23 @@ def main():
     for sample in prj.samples:
         sample.filtered = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.filtered.bam")
 
-    for attrs, index in prj.sheet.df.groupby(["library", "cell_line", "knockout", "clone"]).groups.items():
+    sheet = prj.sheet.loc[~prj.sheet['library'].isin(["RNA-seq", "WGS"]), :]
+
+    for attrs, index in sheet.groupby(["library", "ip", "cell_line", "knockout", "clone", "treatment"]).groups.items():
         name = "_".join([a for a in attrs if not pd.isnull(a)])
-        bams = [s.filtered for s in prj.samples if s.name in prj.sheet.df.loc[index, "sample_name"].tolist()]
+        name = re.sub(r"_{2}", "_", name)
+        name = re.sub(r"_$", "", name)
+        bams = [s.filtered for s in prj.samples if s.name in sheet.loc[index, "sample_name"].tolist()]
 
         merged_bam = os.path.join(output_dir, name + ".merged.bam")
-
         if not os.path.exists(merged_bam):
+            print("Merging BAMs for {}".format(name))
             merge_bams(bams, merged_bam)
+
+        merged_bigwig = os.path.join(output_dir, name + ".merged.bigWig")
+        if not os.path.exists(merged_bigwig):
+            print("Making BigWig for {}".format(name))
+            bamToBigWig(merged_bam, merged_bigwig, tagmented=False, normalize=True)
 
         # Split reads
         if not os.path.exists(os.path.join(output_dir, name + ".nucleosome_reads.bam")):
@@ -171,6 +177,7 @@ def main():
             get_nucleosome_reads(
                 os.path.join(output_dir, name + ".merged.sorted.bam"),
                 os.path.join(output_dir, name + ".nucleosome_reads.bam"))
+
 
 if __name__ == '__main__':
     try:
