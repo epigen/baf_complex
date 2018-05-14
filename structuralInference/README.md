@@ -17,7 +17,7 @@ Jupyter notebooks are also provided to depict the analyses performed locally on 
 
 Several external files may be needed to run the scripts:
 
-* *ARID1A-data.csv*, *ARID1A-pval.csv*, *BRG1-data.csv* and *BRG1-pval.csv* are the averaged IP-MS abundances and their corresponding FDR, and can be downloaded from the [paper website](http://http://www.medical-epigenomics.org/papers/schick2018/).
+* *ARID1A-data.csv*, *ARID1A-pval.csv*, *BRG1-data.csv* and *BRG1-pval.csv* are the averaged IP-MS abundances and their corresponding FDR, and can be downloaded from the [paper website](http://www.medical-epigenomics.org/papers/schick2018/).
 * All fasta files were downloaded from the [BioMart](https://www.ensembl.org/biomart/martview/) as described in the paper.
 * The file *BAF_genefamily.tsv* was downloaded from [HUGO](https://www.genenames.org) for the Gene Family *BAF complex*.
 
