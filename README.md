@@ -2,7 +2,7 @@
 
 ### Systematic functional characterization of BAF mutations yields novel intra-complex synthetic lethalities
 
-Sandra Schick, André F. Rendeiro, Bernd Boidol, Kathrin Runggatscher, Melanie Hinkel, Peter Májek, Thomas Penz, Katja Parapatics, Christian Schmidl, Anna Ringler, Guido Boehmelt, Mark  Petronczki, André Mueller, Christoph Bock, Stefan Kubicek
+Sandra Schick, André F. Rendeiro, Bernd Boidol, Kathrin Runggatscher, Melanie Hinkel, Peter Májek, Loan Vulliard, Thomas Penz, Katja Parapatics, Christian Schmidl, Anna Ringler, Jörg Menche, Guido Boehmelt, Mark Petronczki, André Mueller, Christoph Bock, Stefan Kubicek
 
 **Paper**: [http://dx.doi.org/](http://dx.doi.org/)
 
@@ -30,3 +30,7 @@ If you wish to reproduce the processing of the raw data (https://www.ncbi.nlm.ni
 6. Run the analysis: `make analysis`
 
 Additionaly, processed (bigWig and narrowPeak files together with a gene expression matrix) are available from [GEO with accession number GSE108390](http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE108390).
+
+#### Structural inference analysis
+
+See the *structuralInference* folder.
