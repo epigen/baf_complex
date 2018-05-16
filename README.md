@@ -34,3 +34,6 @@ Additionaly, processed (bigWig and narrowPeak files together with a gene express
 #### Structural inference analysis
 
 See the *structuralInference* folder.
+
+#### Proteomics analysis
+See the *proteomics* folder
