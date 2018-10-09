@@ -113,12 +113,24 @@ def main():
     a549_atac_analysis = ATACSeqAnalysis(name="baf_complex.a549.atacseq", prj=prj, samples=atacseq_samples, results_dir="results_a549")
     a549_atac_analysis = main_analysis_pipeline(a549_atac_analysis, data_type="ATAC-seq", cell_type="A549")
 
+    # RNA-seq
+    rnaseq_samples = [s for s in prj.samples if (s.library == "RNA-seq") & (s.cell_line in ["A549"])]
+    rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]  # and s.pass_qc == 1
+    a549_rnaseq_analysis = RNASeqAnalysis(name="baf-complex.a549.rnaseq", prj=prj, samples=rnaseq_samples, results_dir="results_a549")
+    a549_rnaseq_analysis = main_analysis_pipeline(a549_rnaseq_analysis, data_type="RNA-seq", cell_type="A549")
+
     # H2122 ANALYSIS
     # ATAC-seq
     atacseq_samples = [s for s in prj.samples if (s.library == "ATAC-seq") & (s.cell_line in ["H2122"])]
     atacseq_samples = [s for s in atacseq_samples if os.path.exists(s.filtered)]  # and s.pass_qc == 1
     h2122_atac_analysis = ATACSeqAnalysis(name="baf_complex.h2122.atacseq", prj=prj, samples=atacseq_samples, results_dir="results_h2122")
     h2122_atac_analysis = main_analysis_pipeline(h2122_atac_analysis, data_type="ATAC-seq", cell_type="H2122")
+
+    # RNA-seq
+    rnaseq_samples = [s for s in prj.samples if (s.library == "RNA-seq") & (s.cell_line in ["H2122"])]
+    rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]  # and s.pass_qc == 1
+    h2122_rnaseq_analysis = RNASeqAnalysis(name="baf-complex.h2122.rnaseq", prj=prj, samples=rnaseq_samples, results_dir="results_h2122")
+    h2122_rnaseq_analysis = main_analysis_pipeline(h2122_rnaseq_analysis, data_type="RNA-seq", cell_type="H2122")
 
 
     # ChIP-seq data
@@ -233,6 +245,8 @@ def main():
     phasograms(atacseq_samples)
 
 
+    interaction_new_data()
+
 
 def main_analysis_pipeline(analysis, data_type, cell_type):
     """
@@ -290,7 +304,9 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
 
     if data_type == "RNA-seq":
         # Get gene expression
-        analysis.get_gene_expression(samples=analysis.samples, sample_attributes=["sample_name", "knockout", 'treatment', "replicate", "clone", "batch"])
+        analysis.get_gene_expression(
+            samples=analysis.samples,
+            sample_attributes=["sample_name", "knockout", 'treatment', "replicate", "clone", "batch"])
 
         # see expression of knocked-out genes + other complex members
         baf_genes = pd.read_csv(os.path.join("metadata", "baf_complex_subunits.csv"), squeeze=True)
@@ -304,7 +320,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
 
     # Unsupervised analysis
     red_samples = [s for s in analysis.samples if (
-        ("sh" not in s.name) and
+        # ("sh" not in s.name) and
         ("dBet" not in s.name) and
         ("BRD4" not in s.name) and
         ("parental" not in s.name))]
@@ -315,7 +331,7 @@ def main_analysis_pipeline(analysis, data_type, cell_type):
         attributes_to_plot=plotting_attributes,
         plot_prefix="all_{}".format(feature_name),
         plot_max_attr=20,
-        plot_max_pcs=2,
+        plot_max_pcs=6,
         plot_group_centroids=True,
         axis_ticklabels=False,
         axis_lines=True,
@@ -1542,9 +1558,19 @@ def accessibility_expression(
 
     # By fixed bins of fold-change
     step = 0.25
-    range_max = 5.0
+    range_max = 3.0
+    phase = 0.1
     # bins = zip(-np.arange(step, range_max + step, step)[::-1], -np.arange(0, range_max, step)[::-1])
     bins = zip(np.arange(0, range_max, step), np.arange(step, range_max + step, step))
+    bins += zip(np.arange(phase, range_max, step + phase), np.arange(step + phase, range_max + step + phase, step + phase))
+    bins += zip(np.arange(phase * 1.25, range_max, step + phase * 1.25), np.arange(step + phase * 1.25, range_max + step + phase * 1.25, step + phase * 1.25))
+    bins += zip(np.arange(phase * 1.5, range_max, step + phase * 1.5), np.arange(step + phase * 1.5, range_max + step + phase * 1.5, step + phase * 1.5))
+    bins += zip(np.arange(phase * 1.75, range_max, step + phase * 1.75), np.arange(step + phase * 1.75, range_max + step + phase * 1.75, step + phase * 1.75))
+    bins += zip(np.arange(phase * 2.0, range_max, step + phase * 2.0), np.arange(step + phase * 2.0, range_max + step + phase * 2.0, step + phase * 2.0))
+    bins += zip(np.arange(phase * 2.25, range_max, step + phase * 2.25), np.arange(step + phase * 2.25, range_max + step + phase * 2.25, step + phase * 2.25))
+    bins += zip(np.arange(phase * 2.5, range_max, step + phase * 2.5), np.arange(step + phase * 2.5, range_max + step + phase * 2.5, step + phase * 2.5))
+    bins += zip(np.arange(phase * 2.75, range_max, step + phase * 2.75), np.arange(step + phase * 2.75, range_max + step + phase * 2.75, step + phase * 2.75))
+    bins += zip(np.arange(phase * 3.0, range_max, step + phase * 3.0), np.arange(step + phase * 3.0, range_max + step + phase * 3.0, step + phase * 3.0))
     # bins = bins[:5] + bins[-5:]
 
     dists = pd.DataFrame()
@@ -1574,7 +1600,8 @@ def accessibility_expression(
     axis.set_xlabel("abs log2 fold-change (ATAC-seq)")
     fig.savefig(os.path.join(output_dir, output_prefix + ".fold_changes.signed_max.absolute.cross_knockouts.svg"), bbox_inches="tight", dpi=300)
 
-    means2 = dists.groupby(['max', 'min'])['change'].mean().reset_index()
+    means2 = dists[~dists['knockout'].str.contains("HIRA")].groupby(['max', 'min'])['change'].mean().reset_index()
+    means2 = means2[means2['max'] < 2.5] 
     fig, axis = plt.subplots(1, 1, figsize=(4 * 1, 4 * 1))
     axis.scatter(means2.loc[:, "min"], means2.loc[:, "change"])
     axis.axhline(0, alpha=0.2, color="black", linestyle="--")
@@ -1600,7 +1627,6 @@ def accessibility_expression(
             continue
         axis.flat[i].set_title(ko)
     fig.savefig(os.path.join(output_dir, output_prefix + ".fold_changes.signed_max.absolute.each_knockout.svg"), bbox_inches="tight", dpi=300)
-
 
     # Correlate gene-level enrichments from ATAC-seq and RNA-seq
     atac_enrichment_table = pd.read_csv(
@@ -3139,6 +3165,854 @@ def discordance_analysis(atac_analysis, chipseq_analysis, rnaseq_analysis):
     # plot expression fold change for genes depending on the number of discordant/concordant reg.elements for each subunit
 
 
+def chips_across_knockouts():
+
+    # ChIP-seq on ARID1A across all knockouts
+    chipseq_samples = [s for s in prj.samples if s.library in ["ChIP-seq", "ChIPmentation"]]
+    # chipseq_samples = [s for s in chipseq_samples if os.path.exists(s.filtered)]
+    chipseq_analysis = ChIPSeqAnalysis(name="baf_complex.chipseq.arid1a", prj=prj, samples=chipseq_samples)
+    comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
+    c = comparison_table[
+        (comparison_table['comparison_type'] == 'peaks') &
+        (comparison_table['comparison_name'].str.contains("ARID|SMARC|PBRM")) &
+        (comparison_table['toggle'] == 1)]
+    c['comparison_genome'] = 'hg19'
+    chipseq_analysis.call_peaks_from_comparisons(comparison_table=c)
+    chipseq_analysis.summarize_peaks_from_comparisons(comparison_table=c, output_dir="{results_dir}/chipseq_peaks", permissive=False)
+    chipseq_analysis = get_consensus_sites(comparison_table=c, region_type="peaks", blacklist_bed="wgEncodeDacMapabilityConsensusExcludable.bed")
+    chipseq_analysis.calculate_peak_support(comparison_table=c)
+    chipseq_analysis.measure_coverage()
+    chipseq_analysis.normalize()
+    chipseq_analysis.annotate(quant_matrix="coverage_qnorm")
+    chipseq_analysis.annotate_with_sample_metadata(attributes=['sample_name', 'ip', 'cell_line', 'knockout', 'replicate', 'clone'])
+    chipseq_analysis.to_pickle()
+
+    # Unsupervised analysis
+    unsupervised_analysis(
+        chipseq_analysis, data_type="ATAC-seq", quant_matrix=None, samples=None,
+        attributes_to_plot=['ip', 'knockout', 'replicate'], plot_prefix="chipseq_baf_peaks.arid1a",
+        plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
+        output_dir="{results_dir}/unsupervised")
+    # without histone marks
+    unsupervised_analysis(
+        chipseq_analysis, data_type="ATAC-seq", quant_matrix=None, samples=[s for s in chipseq_analysis.samples if ("ARID" in s.name) or ("SMARC" in s.name)],
+        attributes_to_plot=['ip', 'knockout', 'replicate'], plot_prefix="chipseq_baf_peaks.arid1a.arid1a_only",
+        plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True, axis_ticklabels=False, axis_lines=True, always_legend=False,
+        output_dir="{results_dir}/unsupervised")
+
+    # Supervised analysis
+    data_type = "ChIP-seq"
+    comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
+    comparison_table = comparison_table[
+        (comparison_table['toggle'] == 1) &
+        (comparison_table['data_type'] == data_type) &
+        (comparison_table['comparison_type'] == 'differential')]
+    # chipseq_analysis.differential_results = differential_analysis(
+    #     chipseq_analysis,
+    #     comparison_table,
+    #     data_type="ATAC-seq",
+    #     samples=[s for s in chipseq_analysis.samples if s.name in comparison_table['sample_name'].tolist()],
+    #     output_dir="{}/differential_analysis_{}".format(chipseq_analysis.results_dir, data_type),
+    #     covariates=None,
+    #     alpha=0.05,
+    #     overwrite=True,
+    #     distributed=True)
+    # chipseq_analysis.differential_results = chipseq_analysis.differential_results.set_index("index")
+    from ngs_toolkit.general import differential_from_bivariate_fit
+
+    chipseq_analysis.differential_results = differential_from_bivariate_fit(
+        comparison_table,
+        chipseq_analysis.accessibility,
+        output_dir=os.path.join("results", "differential_analysis_ChIP-seq"),
+        output_prefix="differential_analysis_ChIP-seq.bivariate_fit",
+        n_bins=250, multiple_correction_method="fdr_bh",
+        plot=True, palette="colorblind", make_values_positive=True)
+    chipseq_analysis.to_pickle()
+
+    plot_differential(
+        chipseq_analysis,
+        chipseq_analysis.differential_results.rename(columns={"global_mean": "baseMean", "pval": "pvalue"}), # chipseq_analysis.differential_results[~chipseq_analysis.differential_results['comparison_name'].str.contains("sh|dBet|BRD4")], 
+        # matrix=getattr(chipseq_analysis, "accessibility"),
+        comparison_table=comparison_table,
+        output_dir="{}/differential_analysis_{}".format(chipseq_analysis.results_dir, data_type),
+        output_prefix="differential_analysis_ChIP-seq.bivariate_fit",
+        data_type="ATAC-seq",
+        alpha=0.005,
+        corrected_p_value=False,
+        fold_change=None,
+        rasterized=True,
+        robust=True,
+        group_wise_colours=False,
+        group_variables=plotting_attributes[:3])
+
+
+
+def interaction_new_data():
+
+    # RNA-seq on subunit combination perturbation
+
+    # RNA-seq
+    rnaseq_samples = [s for s in prj.samples if (s.library == "RNA-seq") & (s.cell_line in ["HAP1"])]#  & (s.flowcell in ["BSF_0426_HTHTJBBXX"])]
+    # rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]  # and s.pass_qc == 1
+    kd_rnaseq_analysis = RNASeqAnalysis(name="baf-complex.hap1.rnaseq.KD", prj=prj, samples=rnaseq_samples, results_dir="results")
+    kd_rnaseq_analysis = main_analysis_pipeline(kd_rnaseq_analysis, data_type="RNA-seq", cell_type="HAP1")
+    # kd_rnaseq_analysis.samples = kd_rnaseq_analysis.samples + rnaseq_analysis.samples
+    # kd_rnaseq_analysis.expression_annotated_all = kd_rnaseq_analysis.expression_annotated.join(rnaseq_analysis.expression_annotated)
+
+    # Unsupervised analysis
+    red_samples = [s for s in kd_rnaseq_analysis.samples if (
+        ("dBet" not in s.name) and
+        ("BRD4" not in s.name) and
+        ("parental" not in s.name) and
+        (s.name in kd_rnaseq_analysis.expression_annotated_all.columns))]
+    unsupervised_analysis(
+        kd_rnaseq_analysis,
+        quant_matrix="expression_annotated",
+        samples=red_samples,
+        attributes_to_plot=plotting_attributes,
+        plot_prefix="all_{}".format(feature_name),
+        plot_max_attr=20,
+        plot_max_pcs=4,
+        plot_group_centroids=True,
+        axis_ticklabels=False,
+        axis_lines=True,
+        always_legend=False,
+        display_corr_values=False,
+        test_pc_association=False,
+        output_dir="{results_dir}/unsupervised.20180131")
+
+    # fix batch effect
+    kd_rnaseq_analysis.matrix_batch_fix = fix_batch_effect(
+        getattr(kd_rnaseq_analysis, "expression_annotated"), kd_rnaseq_analysis.samples,
+        batch_variable="batch", standardize=True, intermediate_save=True)
+    file = os.path.join(kd_rnaseq_analysis.results_dir, kd_rnaseq_analysis.name + ".{}.annotated_metadata.batch_fix.csv".format("expression_annotated"))
+    kd_rnaseq_analysis.matrix_batch_fix.to_csv(file)
+
+    # rescale variables
+    m = kd_rnaseq_analysis.expression_annotated
+    mean = m.mean(axis=1)
+    std = m.std(axis=1)
+    kd_rnaseq_analysis.matrix_batch_fix_rescalled = pd.DataFrame(
+        np.multiply(np.add(kd_rnaseq_analysis.matrix_batch_fix.values.T, mean.values), std.values).T,
+        index=m.index, columns=m.columns)
+
+    unsupervised_analysis(
+        kd_rnaseq_analysis,
+        quant_matrix="matrix_batch_fix_rescalled",
+        samples=red_samples,
+        attributes_to_plot=plotting_attributes,
+        plot_prefix="all_{}-matrix_batch_fix_rescalled".format(feature_name),
+        plot_max_attr=20,
+        plot_max_pcs=4,
+        plot_group_centroids=True,
+        axis_ticklabels=False,
+        axis_lines=True,
+        always_legend=False,
+        display_corr_values=False,
+        test_pc_association=False,
+        output_dir="{results_dir}/unsupervised.20180131")
+
+
+    # Find the interaction
+    rnaseq_enrichment_table = pd.read_csv(
+        os.path.join("{}/differential_analysis_{}".format("results", "RNA-seq"), "differential_analysis.enrichr.csv"))
+
+    q = rnaseq_enrichment_table.loc[
+        (rnaseq_enrichment_table['comparison_name'] == 'ARID2') &
+        (rnaseq_enrichment_table['gene_set_library'].isin(["NCI-Nature_2016", "WikiPathways_2016"])) &
+        (rnaseq_enrichment_table['direction'] == 'down') &
+        # (rnaseq_enrichment_table['p_value'] < 0.05) &
+        (
+            rnaseq_enrichment_table['description'].str.contains("E2F") |
+            rnaseq_enrichment_table['description'].str.contains("cell cycle", case=False)), :]
+
+    genes = q.loc[:, "genes"]
+
+    cc_genes = list(set(genes.str.replace("[", " ").str.replace(
+        ']', ' ').str.replace(', ', ' ').sum().split(' ')))
+
+    # clustermap
+    g = sns.clustermap(kd_rnaseq_analysis.matrix_batch_fix.loc[cc_genes, :].dropna(), z_score=0, rasterized=True, xticklabels=True, cmap="RdBu_r")
+    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize=4)
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature&WikiPathways.clustermap.svg"), bbox_inches="tight", dpi=300)
+
+
+    g = sns.clustermap(kd_rnaseq_analysis.matrix_batch_fix.loc[cc_genes, :].dropna().T.groupby(["knockout", "treatment"]).mean().T, z_score=0, rasterized=True, xticklabels=True, cmap="RdBu_r", square=True)
+    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature&WikiPathways.group.clustermap.svg"), bbox_inches="tight", dpi=300)
+
+
+
+    # cc_genes = ["CCND3", "RBL1", "CCND2", "CDK2", "CDC25A"]
+    q = rnaseq_enrichment_table.loc[
+        (rnaseq_enrichment_table['comparison_name'] == 'ARID2') &
+        # (rnaseq_enrichment_table['gene_set_library'] == 'NCI-Nature_2016') &
+        (rnaseq_enrichment_table['direction'] == 'down') &
+        (rnaseq_enrichment_table['p_value'] < 0.05), :]
+
+    genes = q.loc[:, "genes"]
+
+    cc_genes = list(set(genes.str.replace("[", " ").str.replace(
+        ']', ' ').str.replace(', ', ' ').sum().split(' ')))
+
+    # clustermap
+    g = sns.clustermap(kd_rnaseq_analysis.expression_annotated.loc[cc_genes, :].dropna(), z_score=0, rasterized=True, xticklabels=True, yticklabels=False, cmap="RdBu_r")
+    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize=4)
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
+
+    # investigate genes in second cluster (ARID2-specific)
+    clusters = scipy.cluster.hierarchy.fcluster(g.dendrogram_row.linkage, t=2, criterion='maxclust')
+    # plot again just to confirm clusters
+    g2 = sns.clustermap(
+        kd_rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True,
+        row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage, row_colors=plt.get_cmap("Paired")(clusters))
+    g2.ax_heatmap.set_xticklabels(g2.ax_heatmap.get_xticklabels(), rotation=90)
+    g2.ax_heatmap.set_yticklabels(g2.ax_heatmap.get_yticklabels(), rotation=0)
+    g2.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.clusters_labeled.svg"), bbox_inches="tight", dpi=300)
+
+    pbaf_genes = pd.Series(g.data.index).iloc[clusters == pd.Series(clusters).value_counts().argmin()].sort_values()
+
+    g3 = sns.clustermap(kd_rnaseq_analysis.expression.loc[pbaf_genes, :], z_score=0, rasterized=True, metric="correlation")
+    g3.ax_heatmap.set_xticklabels(g3.ax_heatmap.get_xticklabels(), rotation=90)
+    g3.ax_heatmap.set_yticklabels(g3.ax_heatmap.get_yticklabels(), rotation=0)
+    g3.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.pbaf_genes.svg"), bbox_inches="tight", dpi=300)
+
+
+
+def interaction_new_data_independent():
+
+    # Supervised analysis
+    # RNA-seq
+    rnaseq_samples = [s for s in prj.samples if (s.library == "RNA-seq") & (s.cell_line in ["HAP1"]) & (s.flowcell in ["BSF_0426_HTHTJBBXX"])]
+    rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]  # and s.pass_qc == 1
+   # Get gene expression
+    rnaseq_analysis = RNASeqAnalysis(name="baf-complex.rnaseq.only_kd_samples", prj=prj, samples=rnaseq_samples)
+    rnaseq_analysis.get_gene_expression(
+        samples=rnaseq_analysis.samples,
+        sample_attributes=["sample_name", "knockout", 'treatment', "replicate", "clone", "batch"])
+
+    quant_matrix = "expression_annotated"
+    feature_name = "genes"
+
+    # Unsupervised analysis
+    red_samples = [s for s in rnaseq_analysis.samples]
+    unsupervised_analysis(
+        rnaseq_analysis,
+        quant_matrix=quant_matrix,
+        samples=red_samples,
+        attributes_to_plot=plotting_attributes,
+        plot_prefix="all_{}".format(feature_name),
+        plot_max_attr=20,
+        plot_max_pcs=6,
+        plot_group_centroids=True,
+        axis_ticklabels=False,
+        axis_lines=True,
+        always_legend=False,
+        display_corr_values=False,
+        output_dir="{results_dir}/unsupervised.20180320")
+
+    data_type = "RNA-seq"
+    cell_type = "HAP1"
+    comparison_table = pd.read_csv(os.path.join("metadata", "comparison_table.csv"))
+    comparison_table = comparison_table[
+        (comparison_table['toggle'] == 1) &
+        (comparison_table['data_type'] == data_type) &
+        (comparison_table['cell_type'] == cell_type) &
+        (comparison_table['comparison_type'] == 'differential')]
+    rnaseq_analysis.differential_results = differential_analysis(
+        rnaseq_analysis,
+        comparison_table,
+        data_type=data_type,
+        samples=[s for s in rnaseq_analysis.samples if s.name in comparison_table['sample_name'].tolist()],
+        output_dir="{}/differential_analysis_{}.only_kd_samples".format(rnaseq_analysis.results_dir, data_type),
+        covariates=None,
+        alpha=0.05,
+        overwrite=True)
+    rnaseq_analysis.differential_results = rnaseq_analysis.differential_results.set_index("index")
+    rnaseq_analysis.to_pickle()
+
+    alpha = 0.05
+    abs_fold_change = 0
+
+    differential_overlap(
+        rnaseq_analysis.differential_results[
+            (rnaseq_analysis.differential_results['padj'] < alpha) &
+            (rnaseq_analysis.differential_results['log2FoldChange'].abs() >= abs_fold_change)],
+        getattr(rnaseq_analysis, quant_matrix).shape[0],
+        output_dir="{}/differential_analysis_{}.only_kd_samples".format(rnaseq_analysis.results_dir, data_type),
+        data_type=data_type)
+
+    for (alpha, label) in [(0.05, ""), (0.1, ".p0.1")]:
+        plot_differential(
+            rnaseq_analysis,
+            rnaseq_analysis.differential_results, # rnaseq_analysis.differential_results[~rnaseq_analysis.differential_results['comparison_name'].str.contains("sh|dBet|BRD4")], 
+            matrix=getattr(rnaseq_analysis, quant_matrix),
+            comparison_table=comparison_table,
+            output_dir="{}/differential_analysis_{}.only_kd_samples{}".format(rnaseq_analysis.results_dir, data_type, label),
+            output_prefix="differential_analysis",
+            data_type=data_type,
+            alpha=0.1,
+            corrected_p_value=True,
+            fold_change=None,
+            rasterized=True,
+            robust=True,
+            group_wise_colours=True,
+            group_variables=plotting_attributes)
+
+        differential_enrichment(
+            rnaseq_analysis,
+            rnaseq_analysis.differential_results[
+                (rnaseq_analysis.differential_results['padj'] < alpha) &
+                (rnaseq_analysis.differential_results['log2FoldChange'].abs() >= abs_fold_change)],
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}.only_kd_samples{}".format(rnaseq_analysis.results_dir, data_type, label),
+            genome="hg19",
+            directional=True,
+            max_diff=1000,
+            sort_var="pvalue",
+            as_jobs=True)
+
+        collect_differential_enrichment(
+            rnaseq_analysis.differential_results[
+                (rnaseq_analysis.differential_results['padj'] < alpha) &
+                (rnaseq_analysis.differential_results['log2FoldChange'].abs() > abs_fold_change)],
+            directional=True,
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}.only_kd_samples{}".format(rnaseq_analysis.results_dir, data_type, label),
+            permissive=False)
+
+        enrichment_table = pd.read_csv(
+            os.path.join("{}/differential_analysis_{}.only_kd_samples{}".format(rnaseq_analysis.results_dir, data_type, label), "differential_analysis.enrichr.csv"))
+        plot_differential_enrichment(
+            enrichment_table,
+            "enrichr",
+            data_type=data_type,
+            output_dir="{}/differential_analysis_{}.only_kd_samples{}".format(rnaseq_analysis.results_dir, data_type, label),
+            output_prefix="differential_analysis",
+            direction_dependent=True,
+            top_n=5)
+
+    # Directed analysis
+    # Miracle plot
+    # shSMARCA4_over_ARID2KO
+    # vs
+    # shSMARCA4_over_WT
+    d = rnaseq_analysis.differential_results
+    double_changes = d[
+        (d['comparison_name'] == "shSMARCA4shARID2_over_WT") &
+        (d['padj'] < 0.05)]
+    a = d.loc[d['comparison_name'] == "shSMARCA4_over_ARID2KO", "log2FoldChange"]
+    b = d.loc[d['comparison_name'] == "shSMARCA4_over_WT", "log2FoldChange"]
+
+    fig, axis = plt.subplots(1, figsize=(1 * 4, 1 * 4))
+    axis.scatter(a, b, rasterized=True, alpha=0.2, s=2)
+    axis.scatter(a.loc[double_changes.index], b.loc[double_changes.index], color="red", rasterized=True, alpha=0.2, s=2)
+    done = list()
+    for s in a.sort_values().head(25).index:
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+        done.append(s)
+    for s in a.sort_values().head(25).index:
+        if s in done: continue
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+        done.append(s)
+    for s in a.sort_values().tail(25).index:
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+        done.append(s)
+    for s in a.sort_values().tail(25).index:
+        if s in done: continue
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+        done.append(s)
+    for s in double_changes.index:
+        if s in done: continue
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+    axis.plot((-3, 3), (-3, 3), color="black", alpha=0.4)
+    axis.set_xlabel("shSMARCA4_over_ARID2KO")
+    axis.set_ylabel("shSMARCA4_over_WT")
+    sns.despine(fig)
+    fig.savefig(
+        os.path.join(
+            "{}/differential_analysis_{}.only_kd_samples".format(rnaseq_analysis.results_dir, data_type),
+            "ARID2_SMARCA4_interaction.miracle_plot.svg"), bbox_inches="tight", dpi=300)
+
+    # miracle plot2
+    d = rnaseq_analysis.differential_results
+    double_changes = d[
+        (d['comparison_name'] == "shSMARCA4shARID2_over_WT") &
+        (d['padj'] < 0.05)]
+
+    a = d.loc[d['comparison_name'] == "shARID2_over_SMARCA4KO", "log2FoldChange"]
+    b = d.loc[d['comparison_name'] == "shARID2_over_WT", "log2FoldChange"]
+
+    fig, axis = plt.subplots(1, figsize=(1 * 4, 1 * 4))
+    axis.scatter(a, b, rasterized=True, alpha=0.2, s=2)
+    axis.scatter(a.loc[double_changes.index], b.loc[double_changes.index], color="red", rasterized=True, alpha=0.2, s=2)
+    done = list()
+    for s in a.sort_values().head(25).index:
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+        done.append(s)
+    for s in a.sort_values().head(25).index:
+        if s in done: continue
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+        done.append(s)
+    for s in a.sort_values().tail(25).index:
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+        done.append(s)
+    for s in a.sort_values().tail(25).index:
+        if s in done: continue
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+        done.append(s)
+    for s in double_changes.index:
+        if s in done: continue
+        axis.text(a.loc[s], b.loc[s], s, color="black", rasterized=True, alpha=0.5, fontsize=3)
+    axis.plot((-3, 3), (-3, 3), color="black", alpha=0.4)
+    axis.set_xlabel("shARID2_over_SMARCA4KO")
+    axis.set_ylabel("shARID2_over_WT")
+    sns.despine(fig)
+    fig.savefig(
+        os.path.join(
+            "{}/differential_analysis_{}.only_kd_samples".format(rnaseq_analysis.results_dir, data_type),
+            "ARID2_SMARCA4_interaction.miracle_plot2.svg"), bbox_inches="tight", dpi=300)
+
+    # heatmap with top differential from either comparison
+    d = rnaseq_analysis.differential_results
+    double_changes = d[
+        (d['comparison_name'] == "shSMARCA4shARID2_over_WT") &
+        (d['padj'] < 0.05)]
+    g = d.loc[d['comparison_name'] == "shSMARCA4_over_ARID2KO", "log2FoldChange"].abs().sort_values().tail(25).index.tolist()
+    g += d.loc[d['comparison_name'] == "shSMARCA4_over_WT", "log2FoldChange"].abs().sort_values().tail(25).index.tolist()
+    d = rnaseq_analysis.differential_results
+    double_changes = d[
+        (d['comparison_name'] == "shSMARCA4shARID2_over_WT") &
+        (d['padj'] < 0.05)]
+
+    g += d.loc[d['comparison_name'] == "shARID2_over_SMARCA4KO", "log2FoldChange"].abs().sort_values().tail(25).index.tolist()
+    g += d.loc[d['comparison_name'] == "shARID2_over_WT", "log2FoldChange"].abs().sort_values().tail(25).index.tolist()
+
+    # clustermap
+    grid = sns.clustermap(
+        rnaseq_analysis.expression_annotated.loc[set(g), :].dropna(),
+        z_score=0, rasterized=True, xticklabels=rnaseq_analysis.expression_annotated.columns.get_level_values("sample_name"),
+        yticklabels=True, cmap="RdBu_r", cbar_kws={"label": "Expression (Z-score)\non extreme genes in miracle plot"}, robust=True)
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90, fontsize=8)
+    grid.ax_heatmap.set_xlabel("Samples")
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0, fontsize=6)
+    grid.ax_heatmap.set_ylabel("Genes")
+    grid.savefig(
+        os.path.join(
+            "{}/differential_analysis_{}.only_kd_samples".format(rnaseq_analysis.results_dir, data_type),
+            "ARID2_SMARCA4_interaction.miracle_plot.extreme_genes.svg"), bbox_inches="tight", dpi=300)
+
+
+
+def joint_heatmap():
+    import itertools
+
+    def z_score(x, axis=1):
+        """
+        Compute a Z-score, defined as (x - mean(x)) / std(x).
+
+        :param numpy.array x: Numeric array.
+        """
+        return (x - np.nanmean(x, axis=axis)) / np.nanstd(x, axis=axis)
+
+
+    knockout_genes = pd.read_csv(os.path.join("metadata", "baf_complex_subunits.csv"), squeeze=True)
+
+    output_dir = "results"
+    output_prefix = "all_data_types_combined"
+
+    # Start project
+    prj = Project(os.path.join("metadata", "project_config.yaml"))
+    prj._samples = [s for s in prj.samples if s.to_use == "1"]
+    for sample in prj.samples:
+        if sample.library in ["ATAC-seq", "ChIP-seq", "ChIPmentation"]:
+            sample.mapped = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.bam")
+            sample.filtered = os.path.join(sample.paths.sample_root, "mapped", sample.name + ".trimmed.bowtie2.filtered.bam")
+            sample.peaks = os.path.join(sample.paths.sample_root, "peaks", sample.name + "_peaks.narrowPeak")
+        elif sample.library == "RNA-seq":
+            sample.bitseq_counts = os.path.join(sample.paths.sample_root, "bowtie1_{}".format(sample.transcriptome), "bitSeq", sample.name + ".counts")
+
+    # Sample's attributes
+    sample_attributes = ['sample_name', 'cell_line', 'knockout', 'treatment', 'replicate', 'clone', 'batch']
+    plotting_attributes = ['knockout', 'treatment', 'replicate', 'clone', 'batch']
+
+    # RNA ANALYSIS
+    rnaseq_samples = [s for s in prj.samples if (s.library == "RNA-seq") & (s.cell_line in ["HAP1"])]
+    rnaseq_samples = [s for s in rnaseq_samples if os.path.exists(s.bitseq_counts)]
+    rnaseq_analysis = RNASeqAnalysis(name="baf-complex.rnaseq", prj=prj, samples=rnaseq_samples)
+    rnaseq_analysis = rnaseq_analysis.from_pickle()
+
+    # RNA-seq logfoldchanges
+    fc_table = pd.pivot_table(rnaseq_analysis.differential_results.reset_index(), index="comparison_name", columns="index", values="log2FoldChange")
+    fc_table.index.name = "Knockout gene"
+    fc_table.columns.name = "Gene"
+    fc_table = fc_table.loc[knockout_genes, knockout_genes].dropna()
+
+    # IP-MS data
+    # load the data
+    arid = pd.read_csv(os.path.join("metadata", "original", "ARID1A-data.csv"), index_col=0).T
+    arid = arid.loc[~arid.index.str.contains("ARID1A"), ~arid.columns.str.contains("ARID1A")]
+    smarc = pd.read_csv(os.path.join("metadata", "original", "BRG1-data.csv"), index_col=0).T
+    smarc = smarc.loc[~smarc.index.str.contains("SMARCA4"), ~smarc.columns.str.contains("SMARCA4")]
+    arid.index.name = "knockout"
+    arid.columns.name = "subunit"
+    smarc.index.name = "knockout"
+    smarc.columns.name = "subunit"
+
+    arid.index = arid.index.str.replace("\..*", "")
+    arid = arid.groupby(level=0).mean()
+    smarc.index = smarc.index.str.replace("\..*", "")
+    smarc = smarc.groupby(level=0).mean()
+
+    # arid = np.log2(arid)
+    # smarc = np.log2(smarc)
+
+    grid = sns.clustermap(arid.T, cmap="RdBu_r", center=1, metric="correlation", vmin=0, vmax=2, square=True)
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90)
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0)
+    grid.savefig(os.path.join("ip-ms.log2FoldChange.ARID1A.svg"), bbox_inches="tight")
+    grid = sns.clustermap(smarc.T, cmap="RdBu_r", center=1, metric="correlation", vmin=0, vmax=2, square=True)
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90)
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0)
+    grid.savefig(os.path.join("ip-ms.log2FoldChange.SMARCA4.svg"), bbox_inches="tight")
+
+    disc = list()
+    all_ = list()
+    joint = pd.DataFrame()
+    for ko in set(smarc.index.tolist() + arid.index.tolist()):
+        for sub in set(smarc.columns.tolist() + arid.columns.tolist()):
+
+            try:
+                s = smarc.loc[ko, sub]
+            except KeyError:
+                s = np.nan
+            try:
+                a = arid.loc[ko, sub]
+            except KeyError:
+                a = np.nan
+
+            all_.append([ko, sub, a, s])
+
+            if pd.isnull(s) & pd.isnull(a):
+                joint.loc[ko, sub] = np.nan
+                del a, s
+                continue
+
+            if pd.isnull(s):
+                joint.loc[ko, sub] = a
+                del a, s
+                continue
+            if pd.isnull(a):
+                joint.loc[ko, sub] = s
+                del a, s
+                continue
+
+            if (s < 1) and (a < 1):
+                joint.loc[ko, sub] = min(a, s)
+            elif (s > 1) and (a > 1):
+                joint.loc[ko, sub] = max(a, s)
+            else:
+                disc.append([ko, sub, a, s])
+                joint.loc[ko, sub] = np.mean([a, s])
+
+            del a, s
+
+    joint = joint.sort_index(0).sort_index(1)
+    joint.index.name = "knockout"
+    joint.columns.name = "subunit"
+
+    grid = sns.clustermap(
+        joint.fillna(1).T,
+        cmap="RdBu_r", cbar_kws={"label": "fold-change"},
+        center=1, metric="correlation", vmin=0, vmax=2, square=True, row_cluster=False, col_cluster=False)
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90)
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0)
+    grid.savefig(os.path.join("ip-ms.FoldChange.joint.sorted.svg"), bbox_inches="tight")
+
+    grid = sns.clustermap(
+        np.log2(joint.fillna(1).T),
+        cmap="RdBu_r", cbar_kws={"label": "log2(fold-change)"},
+        center=0, metric="correlation", vmin=-1, vmax=1, square=True, row_cluster=False, col_cluster=False)
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90)
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0)
+    grid.savefig(os.path.join("ip-ms.log2FoldChange.joint.sorted.svg"), bbox_inches="tight")
+
+    grid = sns.clustermap(
+        joint.fillna(1).T,
+        cmap="RdBu_r", cbar_kws={"label": "fold-change"},
+        center=1, metric="correlation", vmin=0, vmax=2, square=True)
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90)
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0)
+    grid.savefig(os.path.join("ip-ms.FoldChange.joint.svg"), bbox_inches="tight")
+
+    grid = sns.clustermap(
+        np.log2(joint.fillna(1).T),
+        cmap="RdBu_r", cbar_kws={"label": "log2(fold-change)"},
+        center=0, metric="correlation", vmin=-1, vmax=1, square=True)
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90)
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0)
+    grid.savefig(os.path.join("ip-ms.log2FoldChange.joint.svg"), bbox_inches="tight")
+
+    # 
+
+    # Western
+    # get western data
+    west = pd.read_csv(os.path.join("metadata", "westernblot.subunit_abundance.csv"), index_col=[0, 1])
+    west = west.groupby("gene").mean()
+    # west = west.replace(-10, -5)
+    west[(west < 0)] = -3
+    west[(west > 0)] = 3
+    west = west.reindex(index=knockout_genes, columns=knockout_genes)
+
+    # interaction screen
+    sel_vars = [
+        "CellLine", "GeneSymbol", "Replicate", "Hit",
+        "POC", "POC_noOutliers",
+        "Z", "Z_noOutliers",
+        "TreatmentMean_all", "ControlMean_all", "TreatmentSD_all", "ControlSD_all",
+        "pValue_all", "pValue_noOutliers", "pLogP_all", "pLogP_NoOutliers", "DeltaPOC", "deltaPOC_noOutliers"]
+    num_vars = sel_vars[4:]
+
+    df = pd.read_csv(os.path.join("metadata", "original", "20171120_inclOutliers_inclHits_3.txt"), sep="\t", decimal=",")
+    df = df[sel_vars]
+    df['cell_line'] = "HAP1"
+
+    # remove clone 4
+    df = df[df['CellLine'] != 'SMARCA4 4']
+
+    # Curate/sanitize
+    df.loc[df['CellLine'].str.contains("A549"), "cell_line"] = "A549"
+    df['knockout'] = df['CellLine']
+    df['knockout'] = df['knockout'].str.replace("A549 ", "")
+    df.loc[(df['knockout'] == "WT") & (df['cell_line'] == "A549"), 'knockout'] = "SMARCA4"
+    df.loc[df['knockout'] == "SMARCA4 REC", 'knockout'] = "WT"
+    df.loc[df['knockout'].str.startswith("ARID1A"), 'knockout'] = "ARID1A"
+    df.loc[df['knockout'].str.startswith("SMARCA4"), 'knockout'] = "SMARCA4"
+    df["clone"] = df['CellLine'].str.split(" ").apply(lambda x: x[-1])
+    df['knockdown'] = df['GeneSymbol']
+    for var_ in num_vars:
+        df[var_] = df[var_].astype(float)
+
+    # only single knockdowns
+    screen = df.loc[
+        (~df["knockdown"].astype(str).str.contains("_| ")) &
+        (df['cell_line'] == "HAP1"), :]
+    screen['knockout'] = screen['knockout'].replace("ACTIN", "ACTB")
+
+    # correct p-value
+    from statsmodels.sandbox.stats.multicomp import multipletests
+    screen.loc[~screen['pValue_noOutliers'].isnull(), "pValue_noOutliers_FDR"] = multipletests(
+        screen.loc[~screen['pValue_noOutliers'].isnull(), "pValue_noOutliers"])[1]
+
+    screen2 = screen.copy()
+    screen2.loc[screen2['pValue_noOutliers'] > 0.05, 'deltaPOC_noOutliers'] = 0
+
+    fig, axis = plt.subplots(1, figsize=(4, 4))
+    sns.distplot(screen['pLogP_all'].dropna(), ax=axis)
+    axis.set_xlabel("-log10(p-value)")
+    axis.set_ylabel("Density")
+    fig.savefig(os.path.join("screen_table.pLogP_all.svg"), bbox_inches="tight")
+
+
+    screen_table = pd.pivot_table(
+        screen2, index="knockout", columns="knockdown",
+        values="deltaPOC_noOutliers", aggfunc=np.mean)  # , aggfunc=lambda x: scipy.stats.combine_pvalues(x)[1])
+
+    # normalize to WT
+    # sign = (screen_table >= 0).astype(int).replace(0, -1)
+    # screen_table_fc = sign * np.log2(screen_table.abs() / screen_table.loc['WT', :])
+    # screen_table_diff = screen_table - screen_table.loc['WT', :]
+    # screen_table_fc = screen_table_fc.loc[knockout_genes, knockout_genes]
+    # screen_table_diff = screen_table_diff.loc[knockout_genes, knockout_genes]
+    # screen_table_fc = screen_table_fc.loc[~screen_table_fc.isnull().all(axis=1), ~screen_table_fc.isnull().all(axis=0)]
+    # screen_table_diff = screen_table_diff.loc[~screen_table_diff.isnull().all(axis=1), ~screen_table_diff.isnull().all(axis=0)]
+
+    screen_table = screen_table.loc[knockout_genes, knockout_genes]
+    screen_table = screen_table.loc[~screen_table.isnull().all(axis=1), ~screen_table.isnull().all(axis=0)]
+
+    # scale
+    # screen_table_z = (((screen_table - 0) / (100)) - 1) * 2
+    screen_table_z = screen_table / 10.
+
+    # label and join
+    fc_table['data_type'] = "RNA-seq"
+    ip_ms_log = np.log2(joint) * 3
+    ip_ms_log['data_type'] = "MS"
+    west['data_type'] = "Prot"
+    screen_table_z['data_type'] = "Synth_screen"
+    # screen_table = -screen_table
+    # screen_table['data_type'] = "Synth_screen"
+    joint_table = ip_ms_log.append(fc_table).append(west).append(screen_table_z)
+    joint_table = joint_table.reset_index().set_index(['index', 'data_type']).sort_index()
+
+    # plot
+    m = (joint_table
+            .drop(['ACTL6A', 'ACTL6B', 'SMARCE1', "SS18", "SS18L1"], axis=0)
+            .drop(['ACTL6A', 'ACTL6B', 'SMARCE1', "SS18", "SS18L1"], axis=1))
+
+
+    # reshape matrix manually
+    # df = joint_table
+    m3 = pd.melt(joint_table.reset_index(), id_vars=['index', 'data_type'], var_name="gene").rename(columns={"index": "knockout"})
+
+    # m2 = m[m['data_type'] != "Prot"]
+    # west.index.name = "knockout"
+    # west_m = pd.melt(west.reset_index(), id_vars=['knockout'], var_name="gene").rename(columns={"index": "knockout"})
+    # west_m["data_type"] = "Prot"
+    # m3 = m2.append(west_m)
+
+    techs = ["Prot", "MS", "RNA-seq", "Synth_screen"]
+    q = np.empty((29 * 2, 29 * 2))
+    for i, knockout in enumerate(sorted(m3['knockout'].unique())):
+        for j, gene in enumerate(sorted(m3['gene'].unique())):
+
+            for k, tech in enumerate(techs):
+                if k >= 2: a = 1
+                else: a = 0
+                if k in [1, 3]: b = 1
+                else: b = 0
+                v = m3.loc[
+                    (m3['knockout'] == knockout) &
+                    (m3['gene'] == gene) &
+                    (m3['data_type'] == tech), "value"].squeeze()
+                q[(i * 2) + a, (j * 2) + b] = v if type(v) is np.float64 else np.nan
+
+    q2 = pd.DataFrame(
+        q,
+        index=list(itertools.chain.from_iterable(itertools.repeat(x, 2) for x in sorted(m3['knockout'].unique()))),
+        columns=list(itertools.chain.from_iterable(itertools.repeat(x, 2) for x in sorted(m3['gene'].unique()))))
+
+    # plot
+    # q3 = q2
+    q3 = (q2
+            .drop(['ACTL6A', 'ACTL6B', 'BCL7C', 'SMARCB1', 'SMARCE1', "SS18", "SS18L1"], axis=0))
+            # .drop(['ACTL6A', 'ACTL6B', 'BCL7C', 'SMARCB1', 'SMARCE1', "SS18", "SS18L1"], axis=1))
+
+    sns.set_style("darkgrid")
+    matplotlib.rc('font', family='sans-serif') 
+    matplotlib.rc('font', serif='Arial') 
+    matplotlib.rc('text', usetex='false') 
+    matplotlib.rcParams.update({'font.size': 22})
+
+    fig, axis = plt.subplots(1, figsize=(4, 4))
+    sns.heatmap(
+        q3,
+        center=0, vmin=-3, vmax=3, cmap="RdBu_r", cbar_kws={"label": "log2(fold-change)"},
+        xticklabels=True, yticklabels=True, square=True, ax=axis,
+        linewidths=0, 
+        linecolor="black")
+    axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize=4)
+    axis.set_yticklabels(axis.get_yticklabels(), rotation=0, fontsize=4)
+    axis.set_xlabel("Gene")
+    axis.set_ylabel("Knockout")
+    fig.savefig(os.path.join("all_data_types_combined.all.square.20180411.svg"), bbox_inches="tight")
+
+
+def subunit_network():
+    from scipy.cluster.hierarchy import fcluster
+    import networkx as nx
+
+    results_dir = "results"
+
+    # ATAC-seq
+    data_type = "ATAC-seq"
+    # atac_enr = pd.read_csv(
+    #     os.path.join("{}/differential_analysis_{}".format(results_dir, data_type), "differential_analysis.enrichr.csv"))
+    # atac_enr.loc[atac_enr['direction'] == "down", 'combined_score'] = -atac_enr.loc[atac_enr['direction'] == "down", 'combined_score']
+    # atac_enr_comb = atac_enr.groupby(['gene_set_library', 'description', 'comparison_name'])['combined_score'].mean().reset_index()
+    # atac_enr_comb = atac_enr_comb[~atac_enr_comb['comparison_name'].str.contains(r"_|sh|BRD4|SMARCC2")]
+    atac_enr = pd.read_csv(
+        os.path.join("{}/differential_analysis_{}".format(results_dir, data_type), "differential_analysis.lola.csv"))
+    atac_enr.loc[atac_enr['direction'] == "down", 'pValueLog'] = -atac_enr.loc[atac_enr['direction'] == "down", 'pValueLog']
+    atac_enr_comb = atac_enr.groupby(['collection', 'description', 'comparison_name'])['pValueLog'].mean().reset_index()
+    atac_enr_comb = atac_enr_comb[~atac_enr_comb['comparison_name'].str.contains(r"_|sh|BRD4|SMARCC2")]
+
+    atac = pd.pivot_table(atac_enr_comb, index="description", columns="comparison_name", values="pValueLog")
+    atac_c = atac.corr(method="pearson")
+    grid = sns.clustermap(atac_c, cmap="inferno", metric="correlation")
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90)
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0)
+    grid.ax_heatmap.set_xlabel("Gene")
+    grid.ax_heatmap.set_ylabel("Gene")
+    grid.savefig(os.path.join("subunit_interplay.ATAC-seq.all_enrichment.svg"), bbox_inches="tight")
+
+    # Make network
+    atac_c.index.name = "to"
+    net = pd.melt(atac_c.reset_index(), id_vars=["to"], var_name="from")
+    net['value'] = 6 ** (1 - net['value'])
+    net2 = net[(net['value'] < 2) & (net['value'] != 1)]
+    net2['description'] = "ATAC"
+    g = nx.from_pandas_dataframe(net2, "from", "to", ['description', "value"])
+    nx.write_graphml(g, 'subunit_interplay.network.atac-seq.graphml')
+
+    # cluster subunits
+    clusters = pd.Series(
+        dict(zip(
+            atac_c.index,
+            fcluster(grid.dendrogram_col.linkage, t=7, criterion="maxclust"))))
+    clusters.loc['BCL7A'] = 5
+    clusters.loc['PBRM1'] = 6
+
+    # get terms most specific to each cluster
+    diff_enr = pd.DataFrame()
+    for cluster in sorted(clusters.unique()):
+        own = atac_enr_comb[atac_enr_comb['comparison_name'].isin(clusters[clusters == cluster].index.tolist())]
+        rest = atac_enr_comb[~atac_enr_comb['comparison_name'].isin(clusters[clusters == cluster].index.tolist())]
+        # get diference of mean across subunits of each cluster
+        diff_enr["cluster" + str(cluster) + " " + ",".join(clusters[clusters == cluster].index.tolist())] = (
+            own.groupby(['collection', 'description'])['pValueLog'].mean() -
+            rest.groupby(['collection', 'description'])['pValueLog'].mean())
+    diff_enr.to_csv(os.path.join("subunit_interplay.ATAC-seq.enrichment.20180403.csv"))
+
+
+    # RNA-seq
+    data_type = "RNA-seq"
+    rna_enr = pd.read_csv(
+        os.path.join("{}/differential_analysis_{}".format(results_dir, data_type), "differential_analysis.enrichr.csv"))
+    rna_enr['p_value'] = -np.log10(rna_enr['p_value'])
+    rna_enr.loc[rna_enr['direction'] == "down", 'p_value'] = -rna_enr.loc[rna_enr['direction'] == "down", 'p_value']
+    rna_enr_comb = rna_enr.groupby(['gene_set_library', 'description', 'comparison_name'])['p_value'].mean().reset_index()
+    rna_enr_comb = rna_enr_comb[~rna_enr_comb['comparison_name'].str.contains(r"_|sh|BRD4|SMARCC2")]
+
+    rna = pd.pivot_table(rna_enr_comb, index="description", columns="comparison_name", values="p_value")
+    # rna = pd.pivot_table(rna_enr_comb[rna_enr_comb['gene_set_library'] == gene_set_library], index="description", columns="comparison_name")
+    rna_c = rna.corr()
+    grid = sns.clustermap(rna_c, cmap="inferno", metric="correlation")
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), rotation=90)
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), rotation=0)
+    grid.ax_heatmap.set_xlabel("Gene")
+    grid.ax_heatmap.set_ylabel("Gene")
+    grid.savefig(os.path.join("subunit_interplay.RNA-seq.all_enrichment.svg"), bbox_inches="tight")
+
+    # Make network
+    rna_c.index.name = "to"
+    net = pd.melt(rna_c.reset_index(), id_vars=["to"], var_name="from")
+    net['value'] = 6 ** net['value']
+    net2 = net[(net['value'] != 6)].sort_values("value").tail(200)
+    net2['description'] = "RNA"
+    g = nx.from_pandas_dataframe(net2, "from", "to", ['description', "value"])
+    nx.write_graphml(g, 'subunit_interplay.network.rna-seq.graphml')
+
+    # cluster subunits
+    clusters = pd.Series(
+        dict(zip(
+            rna_c.index.get_level_values("to"),
+            fcluster(grid.dendrogram_col.linkage, t=10, criterion="maxclust"))))
+    clusters.loc['DPF2'] = 9
+
+    # get terms most specific to each cluster
+    diff_enr = pd.DataFrame()
+    for cluster in sorted(clusters.unique()):
+        own = rna_enr_comb[rna_enr_comb['comparison_name'].isin(clusters[clusters == cluster].index.tolist())]
+        rest = rna_enr_comb[~rna_enr_comb['comparison_name'].isin(clusters[clusters == cluster].index.tolist())]
+        # get diference of mean across subunits of each cluster
+        diff_enr["cluster" + str(cluster) + " " + ",".join(clusters[clusters == cluster].index.tolist())] = (
+            own.groupby(['gene_set_library', 'description'])['p_value'].mean() -
+            rest.groupby(['gene_set_library', 'description'])['p_value'].mean())
+    diff_enr.to_csv(os.path.join("subunit_interplay.RNA-seq.enrichment.csv"))
 
 
 if __name__ == '__main__':
