@@ -77,6 +77,7 @@ def main():
 
 
     # Fix batch effect
+    import patsy
     import pandas as pd
     import rpy2
     from rpy2.robjects import numpy2ri, pandas2ri
@@ -106,73 +107,6 @@ def main():
         output_dir="{}/unsupervised_analysis_{}".format(rnaseq_analysis.results_dir, data_type),
         test_pc_association=False, standardize_matrix=False)
 
-    # matrix = rnaseq_analysis.expression_annotated # .loc[:, rnaseq_analysis.expression_annotated.columns.get_level_values("knockout").isin(['WT'])]
-
-    # standardize_data = True
-
-    # fits = least_squares_fit(
-    #     quant_matrix=matrix.T,
-    #     design_matrix=matrix.columns.to_frame(),
-    #     test_model="~ batch -1",
-    #     standardize_data=standardize_data)
-
-    # batches = matrix.columns.get_level_values("batch").unique()
-    # fixed = pd.DataFrame(np.zeros(matrix.shape), index=matrix.index, columns=matrix.columns)
-    # i_fixed = pd.DataFrame(np.zeros(matrix.shape), index=matrix.index, columns=matrix.columns)
-    # for batch in batches:
-    #     # c = fits['Intercept'] if batch == batches[0] else fits['batch[T.{}]'.format(batch)]
-    #     c = fits['batch[{}]'.format(batch)]
-    #     o = matrix.loc[:, matrix.columns.get_level_values("batch") == batch].T
-    #     fixed.loc[:, matrix.columns.get_level_values("batch") == batch] = (o - c).T
-    #     i_fixed.loc[:, matrix.columns.get_level_values("batch") == batch] = (o + (c * 2)).T
-    # rnaseq_analysis.fixed = fixed
-    # rnaseq_analysis.fixed_rescaled = ((fixed.T + matrix.mean(axis=1)) * matrix.std(axis=1)).T
-    # rnaseq_analysis.i_fixed = i_fixed
-    # rnaseq_analysis.i_fixed_rescaled = ((i_fixed.T + matrix.mean(axis=1)) * matrix.std(axis=1)).T
-
-    # unsupervised_analysis(
-    #     rnaseq_analysis, quant_matrix='fixed', plot_prefix="fixed",
-    #     samples=None, attributes_to_plot=prj.group_attributes,
-    #     plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
-    #     axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-    #     output_dir="{}/unsupervised_analysis_{}".format(rnaseq_analysis.results_dir, data_type),
-    #     test_pc_association=False, standardize_matrix=True)
-    # unsupervised_analysis(
-    #     rnaseq_analysis, quant_matrix='fixed_rescaled', plot_prefix="fixed_rescaled",
-    #     samples=None, attributes_to_plot=prj.group_attributes,
-    #     plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
-    #     axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-    #     output_dir="{}/unsupervised_analysis_{}".format(rnaseq_analysis.results_dir, data_type),
-    #     test_pc_association=False, standardize_matrix=True)
-    # unsupervised_analysis(
-    #     rnaseq_analysis, quant_matrix='i_fixed_rescaled', plot_prefix="i_fixed_rescaled",
-    #     samples=None, attributes_to_plot=prj.group_attributes,
-    #     plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
-    #     axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-    #     output_dir="{}/unsupervised_analysis_{}".format(rnaseq_analysis.results_dir, data_type),
-    #     test_pc_association=False)
-
-    # f = subtract_principal_component(
-    #     X=rnaseq_analysis.i_fixed_rescaled.T, pc=1, norm=False, plot=False)
-    # rnaseq_analysis.i_fixed_rescaled_pcafixed = pd.DataFrame(f.T, index=matrix.index, columns=matrix.columns)
-
-    # # f = subtract_principal_component(
-    # #     X=rnaseq_analysis.i_fixed_rescaled_pcafixed.T, pc=1, norm=False, plot=False)
-    # # rnaseq_analysis.i_fixed_rescaled_pcafixed = pd.DataFrame(f.T, index=matrix.index, columns=matrix.columns)
-
-    # unsupervised_analysis(
-    #     rnaseq_analysis, quant_matrix='i_fixed_rescaled_pcafixed', plot_prefix="i_fixed_rescaled_pcafixed",
-    #     samples=None, attributes_to_plot=prj.group_attributes,
-    #     plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
-    #     axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-    #     output_dir="{}/unsupervised_analysis_{}".format(rnaseq_analysis.results_dir, data_type),
-    #     test_pc_association=False,
-    #     standardize_matrix=True)
-
-
-    # Knockout plot
-    knockout_plot(rnaseq_analysis, expression_matrix=rnaseq_analysis.expression_annotated)
-
     # Supervised analysis
     alpha = 0.05
     abs_fold_change = 0
@@ -200,6 +134,12 @@ def main():
         permissive=False,
         overwrite=True)
     rnaseq_analysis.to_pickle()
+
+    # Knockout plot
+    knockout_plot(
+        rnaseq_analysis,
+        expression_matrix=rnaseq_analysis.expression_annotated,
+        comparison_results=rnaseq_analysis.differential_results)
 
     # Overlap between differential regions
     differential_overlap(

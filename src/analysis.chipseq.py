@@ -247,15 +247,26 @@ def diff_atac_heatmap_with_chip(
 
     col = sns.clustermap(
         atac_matrix,
+        z_score=0, center=0, cmap="RdBu_r",
         xticklabels=False, yticklabels=False, metric="correlation", figsize=(1, 1), rasterized=True, robust=robust)
 
     g = sns.clustermap(
         atac_matrix,
         col_linkage=col.dendrogram_col.linkage,
+        z_score=0,
         xticklabels=True, yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
         cmap="RdBu_r", metric="euclidean", figsize=figsize, rasterized=rasterized, robust=robust)
     g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
-    g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.new.euclidean.svg".format(var_name)), bbox_inches="tight", dpi=100)
+    g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.new.euclidean.svg".format(var_name)), bbox_inches="tight", dpi=300)
+
+    g = sns.clustermap(
+        atac_matrix,
+        col_linkage=col.dendrogram_col.linkage,
+        z_score=0,
+        xticklabels=True, yticklabels=False, cbar_kws={"label": "{} of\ndifferential {}".format(quantity, var_name)},
+        cmap="RdBu_r", metric="correlation", figsize=figsize, rasterized=rasterized, robust=robust)
+    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
+    g.fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples.clustermap.new.correlation.svg".format(var_name)), bbox_inches="tight", dpi=300)
 
     g2 = sns.clustermap(
         atac_matrix,
@@ -282,21 +293,21 @@ def diff_atac_heatmap_with_chip(
 
     figsize = (0.12 * c.shape[1], 5)
 
-    from scipy.stats import zscore
-    # chip_z = pd.DataFrame(zscore(c, axis=0), index=regs, columns=chipseq_analysis.binding.columns)
     for label, i in [
             ("all", "H3|CTCF|Pol|ARID|BRD|PBRM|SMARC"),
-            ("histones", "H3|CTCF|Pol"),
+            ("histones", "BRD4|H3|CTCF|Pol"),
             ("baf", "ARID|PBRM|SMARC")
         ]:
         c2 = c.loc[:, c.columns.get_level_values(0).str.contains(i)]
+
+        # c2 = (c2 - c2.mean()) / c2.std()
 
         fig, axis = plt.subplots(1, figsize=figsize)
         sns.heatmap(c2, xticklabels=True, yticklabels=False, ax=axis, vmin=-3, vmax=3, rasterized=rasterized)
         axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
         fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.heatmap.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
-        g3 = sns.clustermap(c2, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize)
+        g3 = sns.clustermap(c2, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize, metric="correlation")
         g3.ax_heatmap.set_xticklabels(g3.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
         g3.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.clustermap.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
@@ -308,11 +319,16 @@ def diff_atac_heatmap_with_chip(
         axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
         fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.mean.heatmap.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
-        g4 = sns.clustermap(c_mean, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize)
+        fig, axis = plt.subplots(1, figsize=figsize)
+        sns.heatmap(c_mean, xticklabels=True, yticklabels=False, ax=axis, vmin=-1.5, vmax=3, rasterized=rasterized, cmap="PuOr_r", center=1)
+        axis.set_xticklabels(axis.get_xticklabels(), rotation=90, fontsize="xx-small")
+        fig.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.mean.heatmap.PuOr_r.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
+
+        g4 = sns.clustermap(c_mean, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize, metric="correlation")
         g4.ax_heatmap.set_xticklabels(g4.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
         g4.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.mean.clustermap.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 
-        g4 = sns.clustermap(c_mean, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize, cmap="PuOr_r")
+        g4 = sns.clustermap(c_mean, xticklabels=True, yticklabels=False, row_cluster=False, vmin=-3, vmax=3, rasterized=rasterized, figsize=figsize, cmap="PuOr_r", metric="correlation")
         g4.ax_heatmap.set_xticklabels(g4.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small")
         g4.savefig(os.path.join(output_dir, output_prefix + ".diff_{}.samples+chip.chip_over_input.only_{}.mean.clustermap.PuOr_r.svg".format(var_name, label)), bbox_inches="tight", dpi=300)
 

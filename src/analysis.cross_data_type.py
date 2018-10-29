@@ -73,7 +73,7 @@ def accessibility_expression(
         expr_dir="deseq_expression_knockout",
         trait="knockout",
         output_dir="results/cross_datatype_comparison",
-        output_prefix="cross_datatype_comparison"
+        output_prefix="cross_datatype_comparison",
         ):
     """
     """
@@ -348,124 +348,124 @@ def accessibility_expression(
 
 
 
-    # ARID2 & SMARCA4
-    sig = rnaseq_analysis.differential_results[
-        (rnaseq_analysis.differential_results['padj'] < alpha) &
-        (rnaseq_analysis.differential_results['log2FoldChange'].abs() > abs_fold_change)]
+    # # ARID2 & SMARCA4
+    # sig = rnaseq_analysis.differential_results[
+    #     (rnaseq_analysis.differential_results['padj'] < alpha) &
+    #     (rnaseq_analysis.differential_results['log2FoldChange'].abs() > abs_fold_change)]
 
-    a = sig[(sig['comparison_name'] == "ARID2") & (sig['direction'] == "up")].index
-    b = sig[(sig['comparison_name'] == "SMARCA4") & (sig['direction'] == "down")].index
-    a[a.isin(b.tolist())].to_series().to_clipboard(index=False)
-    a = sig[(sig['comparison_name'] == "ARID2") & (sig['direction'] == "down")].index
-    b = sig[(sig['comparison_name'] == "SMARCA4") & (sig['direction'] == "up")].index
-    a[a.isin(b.tolist())].to_series().to_clipboard(index=False)
+    # a = sig[(sig['comparison_name'] == "ARID2") & (sig['direction'] == "up")].index
+    # b = sig[(sig['comparison_name'] == "SMARCA4") & (sig['direction'] == "down")].index
+    # a[a.isin(b.tolist())].to_series().to_clipboard(index=False)
+    # a = sig[(sig['comparison_name'] == "ARID2") & (sig['direction'] == "down")].index
+    # b = sig[(sig['comparison_name'] == "SMARCA4") & (sig['direction'] == "up")].index
+    # a[a.isin(b.tolist())].to_series().to_clipboard(index=False)
 
-    a = sig[(sig['comparison_name'] == "ARID2") & (sig['direction'] == "up")].index
-    b = sig[(sig['comparison_name'] == "SMARCA4") & (sig['direction'] == "up")].index
-    a[a.isin(b.tolist())].to_series().to_clipboard(index=False)
+    # a = sig[(sig['comparison_name'] == "ARID2") & (sig['direction'] == "up")].index
+    # b = sig[(sig['comparison_name'] == "SMARCA4") & (sig['direction'] == "up")].index
+    # a[a.isin(b.tolist())].to_series().to_clipboard(index=False)
 
-    a = sig[(sig['comparison_name'] == "ARID2") & (sig['direction'] == "down")].index
-    b = sig[(sig['comparison_name'] == "SMARCA4") & (sig['direction'] == "down")].index
-    a[a.isin(b.tolist())].to_series().to_clipboard(index=False)
-
-
-    # Find the interaction
-    rnaseq_enrichment_table = pd.read_csv(
-        os.path.join("{}/differential_analysis_{}".format(rnaseq_analysis.results_dir, "RNA-seq"), "differential_analysis.enrichr.csv"))
-
-    q = rnaseq_enrichment_table.loc[
-        # (rnaseq_enrichment_table['comparison_name'] == 'ARID2') &
-        (rnaseq_enrichment_table['gene_set_library'].isin(["NCI-Nature_2016"])) &
-        (rnaseq_enrichment_table['direction'] == 'down') &
-        (rnaseq_enrichment_table['p_value'] < 0.05) &
-        (
-            rnaseq_enrichment_table['description'].str.contains("E2F") |
-            rnaseq_enrichment_table['description'].str.contains("cell cycle", case=False)), :]
-
-    genes = q.loc[:, "genes"]
-
-    cc_genes = list(set(genes.str.replace("[", " ").str.replace(
-        ']', ' ').str.replace(', ', ' ').sum().split(' ')))
-
-    # clustermap
-    g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
-    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature&WikiPathways.clustermap.svg"), bbox_inches="tight", dpi=300)
+    # a = sig[(sig['comparison_name'] == "ARID2") & (sig['direction'] == "down")].index
+    # b = sig[(sig['comparison_name'] == "SMARCA4") & (sig['direction'] == "down")].index
+    # a[a.isin(b.tolist())].to_series().to_clipboard(index=False)
 
 
-    g = sns.clustermap(rnaseq_analysis.expression_annotated.loc[cc_genes, :].dropna().T.groupby("knockout").mean().T, z_score=0, rasterized=True, square=True)
-    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature.group.clustermap.svg"), bbox_inches="tight", dpi=300)
+    # # Find the interaction
+    # rnaseq_enrichment_table = pd.read_csv(
+    #     os.path.join("{}/differential_analysis_{}".format(rnaseq_analysis.results_dir, "RNA-seq"), "differential_analysis.enrichr.csv"))
+
+    # q = rnaseq_enrichment_table.loc[
+    #     # (rnaseq_enrichment_table['comparison_name'] == 'ARID2') &
+    #     (rnaseq_enrichment_table['gene_set_library'].isin(["NCI-Nature_2016"])) &
+    #     (rnaseq_enrichment_table['direction'] == 'down') &
+    #     (rnaseq_enrichment_table['p_value'] < 0.05) &
+    #     (
+    #         rnaseq_enrichment_table['description'].str.contains("E2F") |
+    #         rnaseq_enrichment_table['description'].str.contains("cell cycle", case=False)), :]
+
+    # genes = q.loc[:, "genes"]
+
+    # cc_genes = list(set(genes.str.replace("[", " ").str.replace(
+    #     ']', ' ').str.replace(', ', ' ').sum().split(' ')))
+
+    # # clustermap
+    # g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
+    # g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    # g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    # g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature&WikiPathways.clustermap.svg"), bbox_inches="tight", dpi=300)
+
+
+    # g = sns.clustermap(rnaseq_analysis.expression_annotated.loc[cc_genes, :].dropna().T.groupby("knockout").mean().T, z_score=0, rasterized=True, square=True)
+    # g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    # g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    # g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.E2F_in_NCI-Nature.group.clustermap.svg"), bbox_inches="tight", dpi=300)
 
 
 
-    # cc_genes = ["CCND3", "RBL1", "CCND2", "CDK2", "CDC25A"]
-    q = rnaseq_enrichment_table.loc[
-        (rnaseq_enrichment_table['comparison_name'] == 'ARID2') &
-        # (rnaseq_enrichment_table['gene_set_library'] == 'NCI-Nature_2016') &
-        (rnaseq_enrichment_table['direction'] == 'down') &
-        (rnaseq_enrichment_table['p_value'] < 0.05), :]
+    # # cc_genes = ["CCND3", "RBL1", "CCND2", "CDK2", "CDC25A"]
+    # q = rnaseq_enrichment_table.loc[
+    #     (rnaseq_enrichment_table['comparison_name'] == 'ARID2') &
+    #     # (rnaseq_enrichment_table['gene_set_library'] == 'NCI-Nature_2016') &
+    #     (rnaseq_enrichment_table['direction'] == 'down') &
+    #     (rnaseq_enrichment_table['p_value'] < 0.05), :]
 
-    genes = q.loc[:, "genes"]
+    # genes = q.loc[:, "genes"]
 
-    cc_genes = list(set(genes.str.replace("[", " ").str.replace(
-        ']', ' ').str.replace(', ', ' ').sum().split(' ')))
+    # cc_genes = list(set(genes.str.replace("[", " ").str.replace(
+    #     ']', ' ').str.replace(', ', ' ').sum().split(' ')))
 
-    # clustermap
-    g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
-    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
+    # # clustermap
+    # g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
+    # g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    # g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    # g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
 
-    # investigate genes in second cluster (ARID2-specific)
-    clusters = scipy.cluster.hierarchy.fcluster(g.dendrogram_row.linkage, t=2, criterion='maxclust')
-    # plot again just to confirm clusters
-    g2 = sns.clustermap(
-        rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True,
-        row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage, row_colors=plt.get_cmap("Paired")(clusters))
-    g2.ax_heatmap.set_xticklabels(g2.ax_heatmap.get_xticklabels(), rotation=90)
-    g2.ax_heatmap.set_yticklabels(g2.ax_heatmap.get_yticklabels(), rotation=0)
-    g2.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.clusters_labeled.svg"), bbox_inches="tight", dpi=300)
+    # # investigate genes in second cluster (ARID2-specific)
+    # clusters = scipy.cluster.hierarchy.fcluster(g.dendrogram_row.linkage, t=2, criterion='maxclust')
+    # # plot again just to confirm clusters
+    # g2 = sns.clustermap(
+    #     rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True,
+    #     row_linkage=g.dendrogram_row.linkage, col_linkage=g.dendrogram_col.linkage, row_colors=plt.get_cmap("Paired")(clusters))
+    # g2.ax_heatmap.set_xticklabels(g2.ax_heatmap.get_xticklabels(), rotation=90)
+    # g2.ax_heatmap.set_yticklabels(g2.ax_heatmap.get_yticklabels(), rotation=0)
+    # g2.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.clusters_labeled.svg"), bbox_inches="tight", dpi=300)
 
-    pbaf_genes = pd.Series(g.data.index).iloc[clusters == pd.Series(clusters).value_counts().argmin()].sort_values()
+    # pbaf_genes = pd.Series(g.data.index).iloc[clusters == pd.Series(clusters).value_counts().argmin()].sort_values()
 
-    g3 = sns.clustermap(rnaseq_analysis.expression.loc[pbaf_genes, :], z_score=0, rasterized=True, metric="correlation")
-    g3.ax_heatmap.set_xticklabels(g3.ax_heatmap.get_xticklabels(), rotation=90)
-    g3.ax_heatmap.set_yticklabels(g3.ax_heatmap.get_yticklabels(), rotation=0)
-    g3.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.pbaf_genes.svg"), bbox_inches="tight", dpi=300)
-
-
-    # Cell cycle signature
-    joint = rnaseq_analysis.expression_annotated.loc[cc_genes, :].T.groupby('knockout').mean().mean(1)
-    joint_z = pd.Series(scipy.stats.zscore(joint), index=joint.index)
-
-    fig, axis = plt.subplots(1, 2, figsize=(4 * 2, 4))
-    axis[0].scatter(joint.rank(), joint, cmap="RdBu", vmin=joint.min(), vmax=joint.max())
-    for ko in joint.index:
-        axis[0].text(joint.rank()[ko], joint[ko], ko)
-    axis[0].axhline(joint.mean(), linestyle='--', color="black")
-    axis[0].set_xlabel("Cell cycle signature (Rank)")
-    axis[0].set_ylabel("Cell cycle signature score")
-    axis[1].scatter(joint_z.rank(), joint_z, cmap="RdBu", vmin=joint_z.min(), vmax=joint_z.max())
-    for ko in joint_z.index:
-        axis[1].text(joint_z.rank()[ko], joint_z[ko], ko)
-    axis[1].axhline(0, linestyle='--', color="black")
-    axis[1].set_xlabel("Cell cycle signature (Rank)")
-    axis[1].set_ylabel("Cell cycle signature (Z-score)")
-    sns.despine(fig)
-    fig.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.mean_zscore.rank_vs_zscore.svg"), bbox_inches="tight")
+    # g3 = sns.clustermap(rnaseq_analysis.expression.loc[pbaf_genes, :], z_score=0, rasterized=True, metric="correlation")
+    # g3.ax_heatmap.set_xticklabels(g3.ax_heatmap.get_xticklabels(), rotation=90)
+    # g3.ax_heatmap.set_yticklabels(g3.ax_heatmap.get_yticklabels(), rotation=0)
+    # g3.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.clustermap.pbaf_genes.svg"), bbox_inches="tight", dpi=300)
 
 
-    # Classic cell cycle signature
-    cc_genes = pd.read_table("regev_lab_cell_cycle_genes.txt", header=None, squeeze=True)
+    # # Cell cycle signature
+    # joint = rnaseq_analysis.expression_annotated.loc[cc_genes, :].T.groupby('knockout').mean().mean(1)
+    # joint_z = pd.Series(scipy.stats.zscore(joint), index=joint.index)
 
-    # clustermap
-    g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
-    g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
-    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-    g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_regev_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
+    # fig, axis = plt.subplots(1, 2, figsize=(4 * 2, 4))
+    # axis[0].scatter(joint.rank(), joint, cmap="RdBu", vmin=joint.min(), vmax=joint.max())
+    # for ko in joint.index:
+    #     axis[0].text(joint.rank()[ko], joint[ko], ko)
+    # axis[0].axhline(joint.mean(), linestyle='--', color="black")
+    # axis[0].set_xlabel("Cell cycle signature (Rank)")
+    # axis[0].set_ylabel("Cell cycle signature score")
+    # axis[1].scatter(joint_z.rank(), joint_z, cmap="RdBu", vmin=joint_z.min(), vmax=joint_z.max())
+    # for ko in joint_z.index:
+    #     axis[1].text(joint_z.rank()[ko], joint_z[ko], ko)
+    # axis[1].axhline(0, linestyle='--', color="black")
+    # axis[1].set_xlabel("Cell cycle signature (Rank)")
+    # axis[1].set_ylabel("Cell cycle signature (Z-score)")
+    # sns.despine(fig)
+    # fig.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_signature.mean_zscore.rank_vs_zscore.svg"), bbox_inches="tight")
+
+
+    # # Classic cell cycle signature
+    # cc_genes = pd.read_table("regev_lab_cell_cycle_genes.txt", header=None, squeeze=True)
+
+    # # clustermap
+    # g = sns.clustermap(rnaseq_analysis.expression.loc[cc_genes, :].dropna(), z_score=0, rasterized=True)
+    # g.ax_heatmap.set_xticklabels(g.ax_heatmap.get_xticklabels(), rotation=90)
+    # g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    # g.savefig(os.path.join(output_dir, "ARID2_SMARCA4_interaction.cell_cycle_regev_signature.clustermap.svg"), bbox_inches="tight", dpi=300)
 
 
 

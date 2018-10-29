@@ -68,13 +68,6 @@ def main():
     atac_analysis.annotate_with_sample_metadata(quant_matrix="coverage_gc_corrected", attributes=prj.sample_attributes)
     atac_analysis.to_pickle()
 
-
-    # atac_analysis.coverage = atac_analysis.coverage.loc[:, [s.name for s in prj.samples]]
-    # atac_analysis.coverage_qnorm = atac_analysis.coverage_qnorm.loc[:, [s.name for s in prj.samples]]
-    # atac_analysis.coverage_gc_corrected = atac_analysis.coverage_gc_corrected.loc[:, [s.name for s in prj.samples]]
-    # atac_analysis.annotate_with_sample_metadata(quant_matrix="coverage_gc_corrected", attributes=prj.sample_attributes)
-
-
     # Unsupervised analysis
     unsupervised_analysis(
         atac_analysis, quant_matrix=quant_matrix, samples=None,
@@ -85,11 +78,11 @@ def main():
 
 
     # Fix batch effect
+    import patsy
     import pandas as pd
     import rpy2
     from rpy2.robjects import numpy2ri, pandas2ri
     import rpy2.robjects as robjects
-    from rpy2.rinterface import RRuntimeError
     numpy2ri.activate()
     pandas2ri.activate()
 
@@ -98,9 +91,14 @@ def main():
 
     fixed = _removeBatchEffect(
         x=atac_analysis.accessibility.values,
-        batch=matrix.columns.get_level_values("batch"),
-        design=patsy.dmatrix("~knockout - 1", matrix.columns.to_frame()))
-    atac_analysis.limma_fixed = pd.DataFrame(np.asarray(fixed), index=matrix.index, columns=matrix.columns)
+        batch=atac_analysis.accessibility.columns.get_level_values("batch"),
+        design=patsy.dmatrix("~knockout - 1", atac_analysis.accessibility.columns.to_frame()))
+    atac_analysis.limma_fixed = pd.DataFrame(
+        np.asarray(fixed),
+        index=atac_analysis.accessibility.index,
+        columns=atac_analysis.accessibility.columns)
+    atac_analysis.limma_fixed.to_csv(os.path.join(atac_analysis.results_dir, atac_analysis.name + "_peaks.limma_fixed.csv"))
+    atac_analysis.to_pickle()
 
     unsupervised_analysis(
         atac_analysis, quant_matrix='limma_fixed', plot_prefix="limma_fixed",
@@ -108,75 +106,7 @@ def main():
         plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
         axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
         output_dir="{}/unsupervised_analysis_{}".format(atac_analysis.results_dir, data_type),
-        test_pc_association=False, standardize_matrix=False)
-
-    # matrix = atac_analysis.accessibility
-    # standardize_data = True
-
-    # fits = least_squares_fit(
-    #     quant_matrix=matrix.T,
-    #     design_matrix=matrix.columns.to_frame(),
-    #     test_model="~ batch -1",
-    #     standardize_data=standardize_data)
-
-    # batches = matrix.columns.get_level_values("batch").unique()
-    # fixed = pd.DataFrame(np.zeros(matrix.shape), index=matrix.index, columns=matrix.columns)
-    # i_fixed = pd.DataFrame(np.zeros(matrix.shape), index=matrix.index, columns=matrix.columns)
-    # for batch in batches:
-    #     # c = fits['Intercept'] if batch == batches[0] else fits['batch[T.{}]'.format(batch)]
-    #     c = fits['batch[{}]'.format(batch)]
-    #     o = matrix.loc[:, matrix.columns.get_level_values("batch") == batch].T
-    #     fixed.loc[:, matrix.columns.get_level_values("batch") == batch] = (o - c).T
-    #     i_fixed.loc[:, matrix.columns.get_level_values("batch") == batch] = (o + (c * 2)).T
-    # atac_analysis.fixed = fixed
-    # atac_analysis.fixed_rescaled = ((fixed.T + matrix.mean(axis=1)) * matrix.std(axis=1)).T
-    # atac_analysis.i_fixed = i_fixed
-    # atac_analysis.i_fixed_rescaled = ((i_fixed.T + matrix.mean(axis=1)) * matrix.std(axis=1)).T
-
-    # unsupervised_analysis(
-    #     atac_analysis, quant_matrix='fixed', plot_prefix="fixed",
-    #     samples=None, attributes_to_plot=prj.group_attributes,
-    #     plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
-    #     axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-    #     output_dir="{}/unsupervised_analysis_{}".format(atac_analysis.results_dir, data_type),
-    #     test_pc_association=False, standardize_matrix=True)
-    # unsupervised_analysis(
-    #     atac_analysis, quant_matrix='fixed_rescaled', plot_prefix="fixed_rescaled",
-    #     samples=None, attributes_to_plot=prj.group_attributes,
-    #     plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
-    #     axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-    #     output_dir="{}/unsupervised_analysis_{}".format(atac_analysis.results_dir, data_type),
-    #     test_pc_association=False, standardize_matrix=True)
-    # unsupervised_analysis(
-    #     atac_analysis, quant_matrix='i_fixed_rescaled', plot_prefix="i_fixed_rescaled",
-    #     samples=None, attributes_to_plot=prj.group_attributes,
-    #     plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
-    #     axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-    #     output_dir="{}/unsupervised_analysis_{}".format(atac_analysis.results_dir, data_type),
-    #     test_pc_association=False)
-
-    # f = subtract_principal_component(
-    #     X=atac_analysis.i_fixed_rescaled.T, pc=1, norm=False, plot=False)
-    # atac_analysis.i_fixed_rescaled_pcafixed = pd.DataFrame(f.T, index=matrix.index, columns=matrix.columns)
-
-    # # f = subtract_principal_component(
-    # #     X=atac_analysis.i_fixed_rescaled_pcafixed.T, pc=1, norm=False, plot=False)
-    # # atac_analysis.i_fixed_rescaled_pcafixed = pd.DataFrame(f.T, index=matrix.index, columns=matrix.columns)
-
-    # unsupervised_analysis(
-    #     atac_analysis, quant_matrix='i_fixed_rescaled_pcafixed', plot_prefix="i_fixed_rescaled_pcafixed",
-    #     samples=None, attributes_to_plot=prj.group_attributes,
-    #     plot_max_attr=20, plot_max_pcs=8, plot_group_centroids=True,
-    #     axis_ticklabels=False, axis_lines=True, always_legend=False, display_corr_values=False,
-    #     output_dir="{}/unsupervised_analysis_{}".format(atac_analysis.results_dir, data_type),
-    #     test_pc_association=False,
-    #     standardize_matrix=True)
-
-    # Knockout plot
-    from ngs_toolkit.rnaseq import knockout_plot
-    atac_g = atac_analysis.get_gene_level_accessibility()
-    knockout_plot(atac_analysis, expression_matrix=atac_g, output_prefix="knockout_expression.atacseq_gene_level")
-
+        test_pc_association=False)
 
     # Supervised analysis
     alpha = 0.01
@@ -187,7 +117,7 @@ def main():
         (comparison_table['toggle'] == 1) &
         (comparison_table['data_type'] == data_type) &
         (comparison_table['comparison_type'] == 'differential')]
-    atac_analysis.differential_results = differential_analysis(
+    differential_analysis(
         atac_analysis,
         comparison_table,
         data_type=data_type,
@@ -283,6 +213,11 @@ def main():
             direction_dependent=True,
             barplots=False, correlation_plots=False,
             top_n=5 if enrichment_name != "motif" else 300)
+
+    # Knockout plot
+    from ngs_toolkit.rnaseq import knockout_plot
+    atac_g = atac_analysis.get_gene_level_accessibility()
+    knockout_plot(atac_analysis, expression_matrix=atac_g, output_prefix="knockout_expression.atacseq_gene_level")
 
 
 if __name__ == '__main__':
