@@ -1,3 +1,5 @@
+[![PEP compatible](http://pepkit.github.io/img/PEP-compatible-green.svg)](http://pepkit.github.io)
+
 <!--[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.231352.svg)](https://doi.org/10.5281/zenodo.231352)-->
 
 ### Systematic functional characterization of BAF mutations yields novel intra-complex synthetic lethalities
@@ -12,11 +14,9 @@ This repository contains scripts used in the analysis of the data in the paper.
 
 <br>
 
-#### Analysis
+#### Analysis of NGS data
 
-In the [paper website](http://http://www.medical-epigenomics.org/papers/schick2018/) you can find most of the output of the whole analysis.
-
-Here are a few steps needed to reproduce it:
+Here are a few steps needed to reproduce the analysis:
 
 1. Clone the repository: `git clone git@github.com:epigen/baf_complex.git`
 2. Install required software for the analysis:`make requirements` or `pip install -r requirements.txt`
